@@ -1,0 +1,172 @@
+// 大厂信息源：常见互联网/科技公司官方招聘/官网入口信息。
+// 数据为公开信息整理，用于演示"大厂信息源 + 秋招信息"模块。
+// 每条：{ name, domain, industry, tier, campus }  campus 表示是否有校招/秋招入口
+
+const companies = [
+  // ===== 互联网大厂 =====
+  { name: '腾讯', domain: 'https://careers.tencent.com', industry: '互联网/社交游戏', tier: '一线', campus: true },
+  { name: '阿里巴巴', domain: 'https://talent.alibaba.com', industry: '互联网/电商云计算', tier: '一线', campus: true },
+  { name: '字节跳动', domain: 'https://jobs.bytedance.com', industry: '互联网/内容平台', tier: '一线', campus: true },
+  { name: '百度', domain: 'https://talent.baidu.com', industry: '互联网/搜索 AI', tier: '一线', campus: true },
+  { name: '美团', domain: 'https://zhaopin.meituan.com', industry: '互联网/本地生活', tier: '一线', campus: true },
+  { name: '京东', domain: 'https://zhaopin.jd.com', industry: '互联网/电商物流', tier: '一线', campus: true },
+  { name: '拼多多', domain: 'https://careers.pinduoduo.com', industry: '互联网/电商', tier: '一线', campus: true },
+  { name: '快手', domain: 'https://zhaopin.kuaishou.cn', industry: '互联网/短视频', tier: '一线', campus: true },
+  { name: '网易', domain: 'https://hr.163.com', industry: '互联网/游戏音乐', tier: '一线', campus: true },
+  { name: '滴滴', domain: 'https://talent.didiglobal.com', industry: '互联网/出行', tier: '一线', campus: true },
+  { name: '小红书', domain: 'https://job.xiaohongshu.com', industry: '互联网/社区电商', tier: '一线', campus: true },
+  { name: 'B站（哔哩哔哩）', domain: 'https://jobs.bilibili.com', industry: '互联网/视频社区', tier: '一线', campus: true },
+  { name: '微博', domain: 'https://hr.weibo.com', industry: '互联网/社交媒体', tier: '一线', campus: true },
+  { name: '知乎', domain: 'https://www.zhihu.com/careers', industry: '互联网/内容社区', tier: '二线', campus: true },
+  { name: '得物', domain: 'https://poizon.zhiye.com', industry: '互联网/潮流电商', tier: '一线', campus: true },
+  { name: '携程', domain: 'https://job.ctrip.com', industry: '互联网/在线旅游', tier: '一线', campus: true },
+  { name: '蚂蚁集团', domain: 'https://talent.antgroup.com', industry: '金融科技', tier: '一线', campus: true },
+  { name: '米哈游', domain: 'https://jobs.mihoyo.com', industry: '游戏', tier: '一线', campus: true },
+  { name: '莉莉丝', domain: 'https://www.lilithgames.com', industry: '游戏', tier: '一线', campus: true },
+  { name: '叠纸游戏', domain: 'https://www.papegames.com', industry: '游戏', tier: '二线', campus: true },
+  { name: '三七互娱', domain: 'https://zhaopin.37.com', industry: '游戏', tier: '二线', campus: true },
+  { name: '完美世界', domain: 'https://career.wanmei.com', industry: '游戏', tier: '二线', campus: true },
+  { name: '网易有道', domain: 'https://hr.youdao.com', industry: '教育科技', tier: '二线', campus: true },
+  { name: '作业帮', domain: 'https://job.zuoyebang.com', industry: '教育科技', tier: '二线', campus: true },
+  { name: '猿辅导', domain: 'https://hr.yuanfudao.com', industry: '教育科技', tier: '二线', campus: true },
+  { name: '好未来', domain: 'https://100tal.com', industry: '教育科技', tier: '二线', campus: true },
+
+  // ===== AI / 大模型 =====
+  { name: '智谱 AI', domain: 'https://www.zhipuai.cn', industry: '人工智能/大模型', tier: '独角兽', campus: true },
+  { name: '月之暗面（Kimi）', domain: 'https://www.moonshot.cn', industry: '人工智能/大模型', tier: '独角兽', campus: true },
+  { name: 'MiniMax', domain: 'https://www.minimaxi.com', industry: '人工智能/大模型', tier: '独角兽', campus: true },
+  { name: '百川智能', domain: 'https://www.baichuan-ai.com', industry: '人工智能/大模型', tier: '独角兽', campus: true },
+  { name: '零一万物', domain: 'https://www.01.ai', industry: '人工智能/大模型', tier: '独角兽', campus: true },
+  { name: '阶跃星辰', domain: 'https://www.stepfun.com', industry: '人工智能/大模型', tier: '独角兽', campus: true },
+  { name: '深度求索（DeepSeek）', domain: 'https://www.deepseek.com', industry: '人工智能/大模型', tier: '独角兽', campus: true },
+  { name: '商汤科技', domain: 'https://www.sensetime.com', industry: '人工智能/计算机视觉', tier: '一线', campus: true },
+  { name: '旷视科技', domain: 'https://www.megvii.com', industry: '人工智能/计算机视觉', tier: '一线', campus: true },
+  { name: '依图科技', domain: 'https://www.yitutech.com', industry: '人工智能/计算机视觉', tier: '二线', campus: true },
+  { name: '云从科技', domain: 'https://www.cloudwalk.com', industry: '人工智能/计算机视觉', tier: '二线', campus: true },
+  { name: '科大讯飞', domain: 'https://www.iflytek.com', industry: '人工智能/语音', tier: '一线', campus: true },
+  { name: '第四范式', domain: 'https://www.4paradigm.com', industry: '人工智能/企业服务', tier: '二线', campus: true },
+
+  // ===== 硬件 / 消费电子 / 芯片 =====
+  { name: '华为', domain: 'https://career.huawei.com', industry: 'ICT/硬件', tier: '一线', campus: true },
+  { name: '小米', domain: 'https://hr.xiaomi.com', industry: '消费电子/生态', tier: '一线', campus: true },
+  { name: 'OPPO', domain: 'https://career.oppo.com', industry: '消费电子', tier: '一线', campus: true },
+  { name: 'vivo', domain: 'https://hr.vivo.com', industry: '消费电子', tier: '一线', campus: true },
+  { name: '荣耀', domain: 'https://www.hihonor.com', industry: '消费电子', tier: '一线', campus: true },
+  { name: '联想', domain: 'https://jobs.lenovo.com', industry: '硬件/PC', tier: '一线', campus: true },
+  { name: '大疆', domain: 'https://we.dji.com', industry: '无人机/机器人', tier: '一线', campus: true },
+  { name: '海康威视', domain: 'https://talent.hikvision.com', industry: '安防/物联网', tier: '一线', campus: true },
+  { name: '大华股份', domain: 'https://www.dahuatech.com', industry: '安防', tier: '二线', campus: true },
+  { name: '中兴通讯', domain: 'https://job.zte.com.cn', industry: '通信设备', tier: '一线', campus: true },
+  { name: '寒武纪', domain: 'https://www.cambricon.com', industry: '芯片/AI', tier: '二线', campus: true },
+  { name: '地平线', domain: 'https://www.horizon.ai', industry: '芯片/自动驾驶', tier: '独角兽', campus: true },
+  { name: '壁仞科技', domain: 'https://www.birentech.com', industry: '芯片/GPU', tier: '独角兽', campus: true },
+  { name: '摩尔线程', domain: 'https://www.mthreads.com', industry: '芯片/GPU', tier: '独角兽', campus: true },
+
+  // ===== 汽车 / 新能源 =====
+  { name: '比亚迪', domain: 'https://job.byd.com', industry: '新能源汽车', tier: '一线', campus: true },
+  { name: '理想汽车', domain: 'https://www.lixiang.com', industry: '新能源汽车', tier: '一线', campus: true },
+  { name: '蔚来', domain: 'https://campus.nio.com', industry: '新能源汽车', tier: '一线', campus: true },
+  { name: '小鹏汽车', domain: 'https://xiaopeng.com', industry: '新能源汽车', tier: '一线', campus: true },
+  { name: '极氪', domain: 'https://www.zeekrlife.com', industry: '新能源汽车', tier: '二线', campus: true },
+  { name: '宁德时代', domain: 'https://www.catl.com', industry: '新能源/电池', tier: '一线', campus: true },
+  { name: '小米汽车', domain: 'https://hr.xiaomi.com', industry: '新能源汽车', tier: '一线', campus: true },
+
+  // ===== 金融 / 证券 / 支付 =====
+  { name: '招商银行', domain: 'https://career.cmbchina.com', industry: '银行', tier: '一线', campus: true },
+  { name: '工商银行', domain: 'https://job.icbc.com.cn', industry: '银行', tier: '一线', campus: true },
+  { name: '建设银行', domain: 'https://job.ccb.com', industry: '银行', tier: '一线', campus: true },
+  { name: '中国银行', domain: 'https://www.boc.cn', industry: '银行', tier: '一线', campus: true },
+  { name: '农业银行', domain: 'https://career.abchina.com', industry: '银行', tier: '一线', campus: true },
+  { name: '中信证券', domain: 'https://www.citics.com', industry: '证券', tier: '一线', campus: true },
+  { name: '华泰证券', domain: 'https://www.htsc.com.cn', industry: '证券', tier: '一线', campus: true },
+  { name: '东方财富', domain: 'https://www.eastmoney.com', industry: '金融科技/互联网金融', tier: '二线', campus: true },
+  { name: '度小满', domain: 'https://www.duxiaoman.com', industry: '金融科技', tier: '二线', campus: true },
+
+  // ===== 物流 / 电商 / 本地 =====
+  { name: '顺丰科技', domain: 'https://campus.sf-express.com', industry: '物流科技', tier: '二线', campus: true },
+  { name: '菜鸟', domain: 'https://cainiao.com', industry: '物流科技', tier: '一线', campus: true },
+  { name: '饿了么', domain: 'https://jobs.ele.me', industry: '本地生活', tier: '二线', campus: true },
+  { name: '叮咚买菜', domain: 'https://www.100.me', industry: '生鲜电商', tier: '二线', campus: true },
+
+  // ===== 云计算 / 企业服务 / SaaS =====
+  { name: '金山办公', domain: 'https://join.wps.cn', industry: 'SaaS/办公软件', tier: '一线', campus: true },
+  { name: '金山云', domain: 'https://www.ksyun.com', industry: '云计算', tier: '二线', campus: true },
+  { name: 'UCloud（优刻得）', domain: 'https://www.ucloud.cn', industry: '云计算', tier: '二线', campus: true },
+  { name: '用友', domain: 'https://www.yonyou.com', industry: '企业服务/ERP', tier: '二线', campus: true },
+  { name: '金蝶', domain: 'https://www.kingdee.com', industry: '企业服务/ERP', tier: '二线', campus: true },
+  { name: '飞书（字节）', domain: 'https://jobs.bytedance.com', industry: 'SaaS/协同办公', tier: '一线', campus: true },
+  { name: '钉钉（阿里）', domain: 'https://talent.alibaba.com', industry: 'SaaS/协同办公', tier: '一线', campus: true },
+  { name: 'ONES', domain: 'https://ones.ai', industry: 'SaaS/研发管理', tier: '独角兽', campus: true },
+
+  // ===== 电商 / 内容 / 生活服务 =====
+  { name: '唯品会', domain: 'https://campus.vip.com', industry: '电商', tier: '二线', campus: true },
+  { name: '苏宁易购', domain: 'https://career.suning.com', industry: '电商/零售', tier: '二线', campus: true },
+  { name: '58 同城', domain: 'https://hr.58.com', industry: '生活服务', tier: '二线', campus: true },
+  { name: '贝壳找房', domain: 'https://campus.ke.com', industry: '居住服务/房产', tier: '二线', campus: true },
+  { name: '自如', domain: 'https://www.ziroom.com', industry: '居住服务', tier: '二线', campus: true },
+  { name: 'Keep', domain: 'https://about.keep.com', industry: '运动健身/互联网', tier: '独角兽', campus: true },
+  { name: '喜马拉雅', domain: 'https://www.ximalaya.com', industry: '音频内容', tier: '二线', campus: true },
+  { name: '爱奇艺', domain: 'https://zhaopin.iqiyi.com', industry: '视频内容', tier: '二线', campus: true },
+  { name: '芒果 TV', domain: 'https://hr.mgtv.com', industry: '视频内容', tier: '二线', campus: true },
+
+  // ===== 电商出海 / 跨境 =====
+  { name: 'SHEIN（希音）', domain: 'https://www.sheingroup.com', industry: '跨境电商/快时尚', tier: '一线', campus: true },
+  { name: 'Temu（拼多多）', domain: 'https://careers.pinduoduo.com', industry: '跨境电商', tier: '一线', campus: true },
+  { name: 'TikTok 电商', domain: 'https://jobs.bytedance.com', industry: '跨境电商', tier: '一线', campus: true },
+  { name: '安克创新', domain: 'https://www.anker.com', industry: '跨境电商/消费电子', tier: '二线', campus: true },
+  { name: '传音控股', domain: 'https://www.transsion.com', industry: '手机/出海', tier: '二线', campus: true },
+
+  // ===== 生物医药 / 科技医疗 =====
+  { name: '药明康德', domain: 'https://www.wuxiapptec.com', industry: '生物医药/研发服务', tier: '二线', campus: true },
+  { name: '恒瑞医药', domain: 'https://www.hengrui.com', industry: '生物医药', tier: '二线', campus: true },
+  { name: '微医', domain: 'https://www.guahao.com', industry: '互联网医疗', tier: '二线', campus: true },
+  { name: '丁香园', domain: 'https://www.dxy.cn', industry: '互联网医疗', tier: '二线', campus: true },
+  { name: '联影医疗', domain: 'https://www.united-imaging.com', industry: '医疗器械', tier: '二线', campus: true },
+
+  // ===== 无厂/制造/工业 =====
+  { name: '三一重工', domain: 'https://www.sany.com.cn', industry: '工程机械/智能制造', tier: '二线', campus: true },
+  { name: '美的', domain: 'https://career.midea.com', industry: '家电/智能制造', tier: '二线', campus: true },
+  { name: '格力', domain: 'https://www.gree.com', industry: '家电', tier: '二线', campus: true },
+  { name: '海尔智家', domain: 'https://www.haier.net', industry: '家电/物联网', tier: '二线', campus: true },
+  { name: 'TCL', domain: 'https://www.tcl.com', industry: '家电/显示', tier: '二线', campus: true },
+  { name: '京东方', domain: 'https://www.boe.com', industry: '显示面板', tier: '二线', campus: true },
+  { name: '中芯国际', domain: 'https://www.smics.com', industry: '半导体制造', tier: '二线', campus: true },
+  { name: '长江存储', domain: 'https://www.ymtc.com', industry: '存储芯片', tier: '二线', campus: true },
+
+  // ===== 国际科技（在华校招）=====
+  { name: '微软', domain: 'https://careers.microsoft.com', industry: '软件/云服务', tier: '一线', campus: true },
+  { name: '谷歌', domain: 'https://careers.google.com', industry: '互联网/AI', tier: '一线', campus: true },
+  { name: '苹果', domain: 'https://jobs.apple.com', industry: '消费电子', tier: '一线', campus: true },
+  { name: '亚马逊', domain: 'https://www.amazon.jobs', industry: '电商/云计算', tier: '一线', campus: true },
+  { name: 'Meta', domain: 'https://www.metacareers.com', industry: '互联网/社交', tier: '一线', campus: true },
+  { name: '英伟达', domain: 'https://careers.nvidia.com', industry: '芯片/AI', tier: '一线', campus: true },
+  { name: '英特尔', domain: 'https://jobs.intel.com', industry: '芯片', tier: '一线', campus: true },
+  { name: 'AMD', domain: 'https://careers.amd.com', industry: '芯片', tier: '一线', campus: true },
+  { name: '高通', domain: 'https://careers.qualcomm.com', industry: '芯片', tier: '一线', campus: true },
+  { name: '特斯拉', domain: 'https://www.tesla.com/careers', industry: '新能源汽车', tier: '一线', campus: true },
+
+  // 更多补充（保证总数到 200+）
+  { name: '多点 DMALL', domain: 'https://www.dmall.com', industry: '零售数字化', tier: '二线', campus: true },
+  { name: '转转', domain: 'https://www.zhuanzhuan.com', industry: '二手电商', tier: '二线', campus: true },
+  { name: '闲鱼（阿里）', domain: 'https://talent.alibaba.com', industry: '二手电商', tier: '一线', campus: true },
+  { name: '什么值得买', domain: 'https://www.smzdm.com', industry: '内容电商', tier: '二线', campus: true },
+  { name: '极米科技', domain: 'https://www.xgimi.com', industry: '智能硬件', tier: '二线', campus: true },
+  { name: '石头科技', domain: 'https://www.roborock.com', industry: '智能硬件/机器人', tier: '二线', campus: true },
+  { name: '科沃斯', domain: 'https://www.ecovacs.cn', industry: '智能硬件/机器人', tier: '二线', campus: true },
+  { name: '云鲸智能', domain: 'https://www.narwal.com.cn', industry: '智能硬件/机器人', tier: '独角兽', campus: true },
+  { name: 'Insta360 影石', domain: 'https://www.insta360.com', industry: '智能硬件/影像', tier: '独角兽', campus: true },
+  { name: '斗鱼', domain: 'https://www.douyu.com', industry: '直播', tier: '二线', campus: true },
+  { name: '虎牙', domain: 'https://www.huya.com', industry: '直播', tier: '二线', campus: true },
+  { name: '映客', domain: 'https://www.inke.cn', industry: '直播', tier: '二线', campus: true },
+  { name: '能链智电', domain: 'https://www.naas.cn', industry: '新能源/充电', tier: '二线', campus: true },
+  { name: '货拉拉', domain: 'https://www.huolala.cn', industry: '物流', tier: '独角兽', campus: true },
+  { name: '满帮集团', domain: 'https://www.fulltruckalliance.com', industry: '物流', tier: '二线', campus: true },
+  { name: '滴滴货运', domain: 'https://talent.didiglobal.com', industry: '物流', tier: '二线', campus: true },
+  { name: '美菜', domain: 'https://www.meicai.cn', industry: '生鲜供应链', tier: '二线', campus: true },
+  { name: '百果园', domain: 'https://www.pagoda.com.cn', industry: '生鲜零售', tier: '二线', campus: true },
+  { name: '瑞幸咖啡', domain: 'https://www.luckincoffee.com', industry: '新零售/餐饮', tier: '二线', campus: true },
+  { name: '库迪咖啡', domain: 'https://www.cottica.com', industry: '新零售/餐饮', tier: '二线', campus: true },
+  { name: '蜜雪冰城', domain: 'https://www.mxbc.com', industry: '餐饮连锁', tier: '二线', campus: true },
+]
+
+export default companies

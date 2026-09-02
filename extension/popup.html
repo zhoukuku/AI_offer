@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body { width: 300px; margin: 0; font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #1f2329; background: #fff; }
+      .wrap { padding: 16px; }
+      .brand { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+      .logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, #4f5dff, #8b5cf6); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+      .brand b { font-size: 15px; }
+      .brand small { display: block; color: #9aa0a6; font-size: 11px; }
+      label { font-size: 12px; color: #6b7280; display: block; margin-bottom: 5px; }
+      select, input, button { width: 100%; box-sizing: border-box; border-radius: 8px; font-size: 13px; }
+      select, input { padding: 8px 10px; border: 1px solid #e6e8eb; margin-bottom: 10px; }
+      button { padding: 9px 12px; border: 1px solid #e6e8eb; background: #fff; cursor: pointer; margin-bottom: 8px; transition: all .15s; }
+      button.primary { background: #4f5dff; border-color: #4f5dff; color: #fff; font-weight: 500; }
+      button:hover { filter: brightness(1.03); }
+      .msg { font-size: 12px; min-height: 16px; margin-top: 6px; }
+      .msg.ok { color: #16a34a; }
+      .msg.err { color: #ef4444; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand">
+        <div class="logo">简</div>
+        <div><b>简历工作台</b><small>网申填充 · 投递记录 · 面试复盘</small></div>
+      </div>
+
+      <label for="resume">选择要填充的简历</label>
+      <select id="resume"></select>
+
+      <button id="fill" class="primary">🪄 填充当前页面表单</button>
+      <button id="record">📮 将当前页面记录为投递</button>
+      <button id="open">🗓️ 打开工作台（面试复盘）</button>
+
+      <div class="msg" id="msg"></div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>
