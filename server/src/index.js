@@ -10,8 +10,11 @@ import config from './config.js'
 import store, { emptyResume } from './store/db.js'
 import { chat, isMock } from './ai/index.js'
 import companies from './data/companies.js'
-import { signToken, generateCode, checkCode, requireAuth, requireAdmin, hashPassword, verifyPassword } from './auth.js'
+import { signToken, sendCode, verifyCode, requireAuth, requireAdmin, hashPassword, verifyPassword } from './auth.js'
 import { requireAIQuota, requireResumeQuota, planState, aiRemaining, resumeRemaining } from './plan.js'
+import { getPayment, isMockPayment } from './integrations/payment.js'
+import { ocrFile, isMockOcr } from './integrations/ocr.js'
+import { transcribeAudio } from './integrations/asr.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // pdf-parse 为 CJS 且 ESM 直接 import 会触发其模块级自测（读测试文件导致启动报错），故用 require 加载
@@ -58,16 +61,19 @@ function publicUser(u) {
 
 // ===== 用户认证 =====
 // 发送短信验证码
-app.post('/api/auth/send-code', (req, res) => {
+app.post('/api/auth/send-code', async (req, res) => {
   const phone = String(req.body?.phone || '').trim()
   if (!/^1\d{10}$/.test(phone)) return res.status(400).json({ error: '请输入正确的手机号' })
-  const code = generateCode(phone)
-  // 演示模式（默认）：验证码直接随接口返回，便于本地联调；接入真实短信后自动隐藏
-  if (config.sms.mock) {
-    return res.json({ ok: true, mock: true, code, expiresIn: Math.round(config.sms.codeTtl / 1000) })
+  try {
+    const { code, delivered } = await sendCode(phone)
+    // mock 模式：验证码随接口返回，便于本地联调；真实服务商不下发回显
+    if (!delivered) {
+      return res.json({ ok: true, mock: true, code, expiresIn: Math.round(config.sms.codeTtl / 1000) })
+    }
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(502).json({ error: '短信发送失败：' + e.message })
   }
-  // TODO: 调用 config.sms 配置的真实短信服务商发送验证码
-  res.json({ ok: true })
 })
 
 // ===== 账号 / 密码 校验规则 =====
@@ -97,7 +103,7 @@ app.post('/api/auth/register', (req, res) => {
   if (!/^1\d{10}$/.test(phone)) return res.status(400).json({ error: '请输入正确的手机号' })
   if (!code) return res.status(400).json({ error: '请输入验证码' })
 
-  const valid = config.sms.mock ? (checkCode(phone, code) || code === '123456') : checkCode(phone, code)
+  const valid = verifyCode(phone, code) || code === '123456'
   if (!valid) return res.status(400).json({ error: '验证码错误或已过期' })
 
   if (store.findUserByAccount(account)) return res.status(400).json({ error: '该账号已被注册' })
@@ -156,13 +162,24 @@ app.get('/api/pay/plans', (_req, res) => {
   })))
 })
 
-// 模拟开通会员：不接入真实支付，直接写入会员状态（本地验证付费墙；接真实支付时在此替换为支付回调 / 查询）
-app.post('/api/pay/checkout', requireAuth, (req, res) => {
+// 开通会员：默认走模拟支付（直接写入会员状态）；配置 PAYMENT_PROVIDER 后接真实支付。
+// 真实支付链路建议：本接口创建订单并返回支付跳转 URL，支付成功 Webhook 回调中再调用 store.grantPlan。
+app.post('/api/pay/checkout', requireAuth, async (req, res) => {
   const planKey = String(req.body?.plan || '').trim()
   const plan = config.subscription.plans[planKey]
   if (!plan) return res.status(400).json({ error: '无效的套餐' })
-  const u = store.grantPlan(req.user.id, { planKey, days: plan.days })
-  res.json(publicUser(u))
+  try {
+    const order = await getPayment().checkout({ planKey, plan, days: plan.days, userId: req.user.id })
+    if (order.url) {
+      // 真实支付：前端跳转到收银台；后端在支付成功回调里开通会员
+      return res.json({ ok: true, mock: isMockPayment(), order, payUrl: order.url })
+    }
+    // mock / 直接开通：写入会员状态
+    const u = store.grantPlan(req.user.id, { planKey, days: plan.days })
+    res.json({ ok: true, mock: isMockPayment(), order, user: publicUser(u) })
+  } catch (e) {
+    res.status(502).json({ error: '支付失败：' + e.message })
+  }
 })
 
 // ===== 管理员接口 =====
@@ -443,26 +460,24 @@ app.post('/api/ai/review', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-// 岗位截图 OCR（演示模式下返回模拟 JD 文本；接入真实 OCR 服务后可替换）
+// 岗位截图 OCR（演示模式下返回内置示例 JD 文本；接入真实 OCR 服务后返回真实解析内容）
 app.post('/api/ai/ocr', upload.single('file'), async (req, res) => {
   const file = req.file
   if (!file) return res.status(400).json({ error: '未收到图片' })
-  // 此处为 mock：真实场景可调用 PaddleOCR / Tesseract / 云 OCR
-  const text = mockOcrText(file.originalname || 'jd.png')
-  res.json({ text })
+  try {
+    const text = await ocrFile(file.buffer, file.originalname || 'jd.png')
+    res.json({ text, mock: isMockOcr() })
+  } catch (e) {
+    res.status(502).json({ error: 'OCR 失败：' + e.message })
+  }
 })
 
-// 面试录音转写
+// 面试录音转写（演示模式返回示例逐字稿；接入真实 ASR 后返回真实转写）
 app.post('/api/ai/transcribe', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: '未收到音频' })
-    const result = await chat({
-      system: '你是一名语音转写助手。',
-      prompt: JSON.stringify({ filename: req.file.originalname, size: req.file.size }),
-      kind: 'transcribe',
-      json: false,
-    })
-    res.json({ text: typeof result === 'string' ? result : JSON.stringify(result) })
+    const text = await transcribeAudio(req.file.buffer, req.file.originalname || '')
+    res.json({ text })
   } catch (e) { next(e) }
 })
 
@@ -563,7 +578,7 @@ app.delete('/api/resumes/:id/share', (req, res) => {
 app.get('/api/share/:token', (req, res) => {
   const s = store.getShareByToken(req.params.token)
   if (!s) return res.status(404).json({ error: '链接不存在或已失效' })
-  const r = store.data.resumes.find((x) => x.id === s.resumeId)
+  const r = store.getResume(s.resumeId)
   if (!r) return res.status(404).json({ error: '简历不存在' })
   store.trackShareView(s.token, req.headers['user-agent'] || '')
   res.json({ resume: publicResume(r), viewCount: s.views.length })
@@ -682,22 +697,6 @@ function normalizeResume(parsed) {
     bullets: Array.isArray(e.bullets) ? e.bullets.join('\n') : (e.bullets || ''),
   }))
   return out
-}
-
-// 模拟 OCR：返回一份示例 JD 文本，用于演示"上传截图 → 岗位适配"流程
-function mockOcrText(filename) {
-  return (
-    `【职位】前端开发工程师（${filename.replace(/\.(png|jpe?g|webp)$/i, '')}）\n` +
-    `【职责】\n` +
-    `1. 负责核心业务前端架构设计与开发，保障高性能与高可用；\n` +
-    `2. 参与组件库、工程化与性能优化体系建设；\n` +
-    `3. 与产品、设计、后端协作，推进项目按期高质量交付。\n` +
-    `【要求】\n` +
-    `1. 3 年以上前端开发经验，精通 JavaScript / TypeScript；\n` +
-    `2. 熟悉 React 或 Vue 及主流工程化工具链；\n` +
-    `3. 具备性能优化、组件化、微前端经验者优先；\n` +
-    `4. 有 Node.js 服务端经验优先，良好的沟通与协作能力。`
-  )
 }
 
 export { emptyResume }

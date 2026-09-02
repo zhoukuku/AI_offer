@@ -6,6 +6,15 @@ import 'dotenv/config'
 const config = {
   port: Number(process.env.PORT || 8787),
 
+  // ===== 数据存储层 =====
+  // sqlite（默认）：生产级，支持多用户并发、原子事务，是参赛作品的工程亮点。
+  // file：旧版 JSON 文件库回退（单进程演示用），设置 DB_TYPE=file 可退回。
+  db: {
+    type: process.env.DB_TYPE || 'sqlite',
+    // SQLite 文件路径（留空则用 data/app.db）
+    file: process.env.DB_FILE || '',
+  },
+
   ai: {
     // 留空则使用 mock 模式
     apiKey: process.env.AI_API_KEY || '',
@@ -18,10 +27,24 @@ const config = {
     model: process.env.AI_MODEL || 'deepseek-chat',
   },
 
-  // 面试录音转写：默认使用与主对话相同的模型（需支持音频）。未配置时 mock。
+  // ===== 短信验证码 =====
+  // provider=mock（默认）：验证码直接随接口返回，便于无短信服务商时本地联调；
+  //                       接真实短信后改为 aliyun / tencent，验证码不再回显。
+  sms: {
+    provider: process.env.SMS_PROVIDER || 'mock',
+    mock: (process.env.SMS_PROVIDER || 'mock') === 'mock', // 兼容旧字段
+    codeTtl: 5 * 60 * 1000, // 验证码有效期（毫秒），默认 5 分钟
+    accessKeyId: process.env.SMS_ACCESS_KEY_ID || '',
+    accessKeySecret: process.env.SMS_ACCESS_KEY_SECRET || '',
+    signName: process.env.SMS_SIGN_NAME || '',
+    templateCode: process.env.SMS_TEMPLATE_CODE || '',
+  },
+
+  // ===== 语音转写 ASR =====
+  // provider=mock（默认）：返回示例逐字稿；provider=whisper/funasr 时调用真实服务。
   asr: {
-    enabled: process.env.ASR_ENABLED === '1',
-    // 需要真实 ASR 时可指向 FunASR / whisper 服务等
+    provider: process.env.ASR_PROVIDER || 'mock',
+    enabled: (process.env.ASR_PROVIDER || 'mock') !== 'mock', // 兼容旧字段
     endpoint: process.env.ASR_ENDPOINT || '',
   },
 
@@ -43,7 +66,8 @@ const config = {
 
   // ===== 订阅 / 会员 =====
   // 免费档：注册即可使用基础功能，AI 高级能力给予有限的「免费试用次数」。
-  // 试用次数用完后需开通会员。付费接入当前为「模拟开通」，本地即可跑通付费墙；接真实支付时替换 pay 相关接口即可。
+  // 试用次数用完后需开通会员。付费默认走「模拟开通」（本地即可跑通付费墙）；
+  // 接真实支付时把 PAYMENT_PROVIDER 设为 stripe / wechat 并在 integrations/payment.js 实现。
   subscription: {
     // 免费档限制
     free: {
@@ -56,18 +80,23 @@ const config = {
     },
   },
 
-  // ===== 短信验证码 =====
-  sms: {
-    // 是否走演示模式：true 时验证码直接随接口返回（便于无短信服务商时本地联调）。
-    mock: process.env.SMS_MOCK !== '0',
-    // 验证码有效期（毫秒），默认 5 分钟
-    codeTtl: 5 * 60 * 1000,
-    // 真实短信服务商配置（阿里云/腾讯云等），接入真实短信时在此扩展
-    provider: process.env.SMS_PROVIDER || '',
-    accessKeyId: process.env.SMS_ACCESS_KEY_ID || '',
-    accessKeySecret: process.env.SMS_ACCESS_KEY_SECRET || '',
-    signName: process.env.SMS_SIGN_NAME || '',
-    templateCode: process.env.SMS_TEMPLATE_CODE || '',
+  // ===== 支付 =====
+  // provider=mock（默认）：模拟开通，直接写入会员状态，本地即可跑通付费墙；
+  // provider=stripe / wechat：调用真实支付，支付成功回调后写入会员（见 integrations/payment.js）。
+  payment: {
+    provider: process.env.PAYMENT_PROVIDER || 'mock',
+    stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
+    wechatMchId: process.env.WECHAT_MCH_ID || '',
+    wechatApiKey: process.env.WECHAT_API_KEY || '',
+  },
+
+  // ===== OCR（简历 / JD 解析）=====
+  // provider=mock（默认）：内置示例解析文本，保证「上传截图 → 岗位适配」链路在无 OCR 服务时也能演示；
+  // provider=tencent / baidu：调用真实 OCR（见 integrations/ocr.js）。
+  ocr: {
+    provider: process.env.OCR_PROVIDER || 'mock',
+    secretId: process.env.OCR_SECRET_ID || '',
+    secretKey: process.env.OCR_SECRET_KEY || '',
   },
 }
 

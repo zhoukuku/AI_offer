@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import config from './config.js'
 import store from './store/db.js'
+import { getSms, isMockSms } from './integrations/sms.js'
 
 // 签名密钥：未配置时进程内随机生成（重启后旧登录态失效）
 const SECRET = config.auth.secret || crypto.randomBytes(32).toString('hex')
@@ -49,31 +50,20 @@ export function verifyToken(token) {
   return userId
 }
 
-// ---- 短信验证码（内存存储）----
-const codes = new Map() // phone -> { code, expiresAt, tries }
-
-export function generateCode(phone) {
-  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0')
-  codes.set(phone, { code, expiresAt: Date.now() + config.sms.codeTtl, tries: 0 })
-  return code
+// ---- 短信验证码（委托给 integrations/sms.js，支持 mock / 真实服务商）----
+// 发送验证码：mock 模式返回 { delivered:false, code }（code 随接口回显，便于本地联调）
+export async function sendCode(phone) {
+  return getSms().send(phone)
 }
 
 // 校验验证码；成功清除并返回 true
-export function checkCode(phone, code) {
-  const rec = codes.get(phone)
-  if (!rec) return false
-  if (Date.now() > rec.expiresAt) {
-    codes.delete(phone)
-    return false
-  }
-  if (rec.tries >= 5) {
-    codes.delete(phone)
-    return false
-  }
-  rec.tries += 1
-  if (rec.code !== String(code).trim()) return false
-  codes.delete(phone)
-  return true
+export function verifyCode(phone, code) {
+  return getSms().verify(phone, code)
+}
+
+// 当前是否 mock 短信（供 index.js 决定是否回显验证码）
+export function smsIsMock() {
+  return isMockSms()
 }
 
 // ---- 鉴权中间件 ----
