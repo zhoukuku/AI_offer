@@ -36,7 +36,7 @@ test('注册、导入、编辑、诊断、适配、版本、分享、投递、�
   assert.equal((await request('/auth/me',{token})).data.quota.aiRemaining,before)
   for(const kind of ['coverletter','greet','duplicate','questions','interview','analyze','rewrite','chat','generate','experience']) {const response=await request('/ai/'+kind,{token,body:{resume,company:'目标公司',position:'前端',role:'前端',jd:'React',section:'summary',content:'真实经历',messages:[{role:'user',content:'如何改进？'}]}});assert.equal(response.status,200,kind)}
   const paid=await request('/pay/checkout',{token,body:{plan:'monthly'}});assert.equal(paid.status,200);assert.equal(paid.data.user.quota.effective,'pro')
-  assert.equal((await request('/auth/me',{token})).data.quota.aiRemaining,-1)
+  assert.equal((await request('/auth/me',{token})).data.quota.aiRemaining,100)
   await request('/resumes/'+id,{token,method:'DELETE'});assert.equal((await request('/resumes/'+id,{token})).status,404)
  }finally{await server.stop()}
 })

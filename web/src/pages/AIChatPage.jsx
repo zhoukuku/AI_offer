@@ -11,7 +11,7 @@ const PRESETS = [
 
 const SECTIONS = [
   { key: 'summary', label: '个人总结', get: (r) => r.summary || '' },
-  { key: 'basics', label: '基本信息', get: (r) => JSON.stringify(r.basics || {}, null, 2) },
+  { key: 'basics', label: '基本信息', get: (r) => JSON.stringify(Object.fromEntries(Object.entries(r.basics || {}).filter(([key]) => key !== 'avatar')), null, 2) },
   { key: 'experience', label: '工作经历', get: (r) => JSON.stringify(r.experience || [], null, 2) },
   { key: 'projects', label: '项目经历', get: (r) => JSON.stringify(r.projects || [], null, 2) },
   { key: 'education', label: '教育经历', get: (r) => JSON.stringify(r.education || [], null, 2) },
@@ -103,7 +103,7 @@ export default function AIChatPage() {
       if (section !== 'summary' && (section === 'basics' ? !content || typeof content !== 'object' || Array.isArray(content) : !Array.isArray(content))) throw new Error('区域格式不正确，请保留原字段结构')
       if (!window.confirm('请核实改写内容。确认后会备份原文并应用这个区域。')) return
       const before = {id:'v'+Date.now(),name:'区域改写前备份',createdAt:Date.now(),content:normalizeResume(resume)}
-      const updated = await api.updateResume(current,{[section]:content,versions:[...(resume.versions || []),before]})
+      const updated = await api.updateResume(current,{[section]:section === 'basics' ? {...content, avatar: resume.basics?.avatar || ''} : content,versions:[...(resume.versions || []),before]})
       setResume(updated);setSectionText(SECTIONS.find(s=>s.key===section).get(updated));setRewriteDraft('');setResult('已应用并保存，原文已备份到版本快照')
     } catch(e) {setError('应用失败：'+e.message)}
   }

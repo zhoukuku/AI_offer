@@ -45,6 +45,10 @@ class Store {
     this.db = new Database(DB_FILE)
     this.db.pragma('journal_mode = WAL') // 写前日志，提升并发读写性能
     this.db.pragma('busy_timeout = 5000') // 锁等待，避免并发写入偶发失败
+    this.db.exec(`CREATE TABLE IF NOT EXISTS ai_quota_requests (
+      id TEXT PRIMARY KEY, userId TEXT NOT NULL, periodStart INTEGER NOT NULL,
+      createdAt INTEGER NOT NULL, free INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS ai_quota_user_time ON ai_quota_requests(userId, createdAt);`)
     this._initSchema()
     this._migrateFromJson()
     this._healUserIdColumns()
@@ -212,7 +216,10 @@ class Store {
 
   // 开通会员（模拟支付：直接写入 plan=pro 与到期时间）
   grantPlan(id, { planKey, days }) {
-    return this.updateUser(id, { plan: 'pro', planExpiresAt: Math.max(Date.now(), this.findUserById(id)?.planExpiresAt || 0) + days * 86400000, planKey })
+    const user = this.findUserById(id)
+    const now = Date.now()
+    const active = user?.plan === 'pro' && (!user.planExpiresAt || user.planExpiresAt > now)
+    return this.updateUser(id, { plan: 'pro', planExpiresAt: Math.max(now, user?.planExpiresAt || 0) + days * 86400000, planKey, planStartedAt: active ? user.planStartedAt || user.createdAt : now })
   }
 
   // 用户已保留的简历数量（用于免费档简历名额判断）
@@ -251,6 +258,36 @@ class Store {
       if (!i.userId) { i.userId = userId; this._save('interviews', i.id, i, i.createdAt, Date.now()); changed = true }
     }
     return changed
+  }
+
+  countAIQuota(userId, start, free = false) {
+    return this.db.prepare('SELECT count(*) AS n FROM ai_quota_requests WHERE userId = ? AND createdAt >= ? AND free = ?').get(userId, start, free ? 1 : 0).n
+  }
+
+  reserveAIQuota(userId, { limit, periodStart, dailyLimit, dayStart, free }) {
+    return this.db.transaction(() => {
+      const user = this.findUserById(userId)
+      const used = free ? user?.aiUsed || 0 : this.countAIQuota(userId, periodStart)
+      if (!user || used >= limit) return { error: 'period' }
+      const daily = this.db.prepare('SELECT count(*) AS n FROM ai_quota_requests WHERE userId = ? AND createdAt >= ?').get(userId, dayStart).n
+      if (daily >= dailyLimit) return { error: 'daily' }
+      const id = crypto.randomBytes(16).toString('hex')
+      this.db.prepare('INSERT INTO ai_quota_requests VALUES (?, ?, ?, ?, ?)').run(id, userId, periodStart, Date.now(), free ? 1 : 0)
+      if (free) this.updateUser(userId, { aiUsed: (user.aiUsed || 0) + 1 })
+      return { id }
+    })()
+  }
+
+  refundAIQuota(id) {
+    this.db.transaction(() => {
+      const record = this.db.prepare('SELECT * FROM ai_quota_requests WHERE id = ?').get(id)
+      if (!record) return
+      this.db.prepare('DELETE FROM ai_quota_requests WHERE id = ?').run(id)
+      if (record.free) {
+        const user = this.findUserById(record.userId)
+        if (user) this.updateUser(user.id, { aiUsed: Math.max(0, (user.aiUsed || 0) - 1) })
+      }
+    })()
   }
 
   // Reserve quota synchronously in one SQLite transaction, including multiple server processes.

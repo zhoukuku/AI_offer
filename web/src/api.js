@@ -54,7 +54,7 @@ async function request(path, opts = {}) {
     err.status = res.status
     err.code = e.code
     // 402 表示付费墙拦截：需要升级会员
-    if (res.status === 402 || e.upgrade) { err.upgrade = true; window.dispatchEvent(new CustomEvent('rw-upgrade-required', { detail: err.message })) }
+    if (e.upgrade || e.code === 'UPGRADE_REQUIRED') { err.upgrade = true; window.dispatchEvent(new CustomEvent('rw-upgrade-required', { detail: err.message })) }
     throw err
   }
   const data = await res.json()

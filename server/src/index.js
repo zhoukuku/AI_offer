@@ -12,7 +12,7 @@ import store, { emptyResume } from './store/db.js'
 import { chat, isMock, aiStats } from './ai/index.js'
 import companies from './data/companies.js'
 import { signToken, sendCode, verifyCode, requireAuth, requireAdmin, hashPassword, verifyPassword } from './auth.js'
-import { requireAIQuota, requireResumeQuota, planState, aiRemaining, resumeRemaining } from './plan.js'
+import { requireAIQuota, requireResumeQuota, planState, aiRemaining, aiPeriod, resumeRemaining } from './plan.js'
 import { getPayment, isMockPayment } from './integrations/payment.js'
 import { ocrFile, isMockOcr } from './integrations/ocr.js'
 import { transcribeAudio } from './integrations/asr.js'
@@ -82,6 +82,9 @@ function publicUser(u) {
     quota: {
       effective: s.effective, // 'pro' | 'free'
       proActive: s.proActive,
+      aiLimit: s.isAdmin ? -1 : s.proActive ? config.subscription.pro.aiQuota : config.subscription.free.aiQuota,
+      aiResetsAt: s.proActive ? aiPeriod(u).resetsAt : null,
+      aiDailyLimit: s.isAdmin ? -1 : config.subscription.pro.dailyQuota,
       aiRemaining: aiRemaining(u), // -1 表示不限
       resumeRemaining: resumeRemaining(u), // -1 表示不限
     },
@@ -187,6 +190,8 @@ app.get('/api/pay/plans', (_req, res) => {
     name: p.name,
     price: p.price, // 单位：分
     days: p.days,
+    aiQuota: config.subscription.pro.aiQuota,
+    dailyQuota: config.subscription.pro.dailyQuota,
   })))
 })
 
@@ -232,7 +237,12 @@ app.put('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
 // ===== 登录用户业务数据隔离：以下业务接口统一要求登录 =====
 app.use(['/api/resumes', '/api/applications', '/api/interviews', '/api/ai'], requireAuth)
 // AI 能力统一消耗配额（免费档受限）；付费 / 试用 / 管理员不受限
-app.use('/api/ai', requireAIQuota)
+app.use('/api/ai', (req, res, next) => {
+  const clean = value => Array.isArray(value) ? value.map(clean) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => !['avatar', 'versions'].includes(key)).map(([key, v]) => [key, clean(v)])) : value
+  req.body = clean(req.body)
+  if (JSON.stringify(req.body || {}).length > 32000) return res.status(400).json({ error: '内容过长，请精简简历、岗位描述或开始新对话后重试' })
+  next()
+}, requireAIQuota)
 app.use(['/api/ai', '/api/resumes/import'], (req, res, next) => { res.set('X-AI-Mode', isMock ? 'local' : 'live'); next() })
 
 // ===== 简历 CRUD（登录用户只看自己的数据）=====
@@ -262,7 +272,7 @@ app.delete('/api/resumes/:id', (req, res) => {
 })
 
 // 旧简历解析导入（智能填写）：上传 PDF/Word/图片，自动提取字段并生成一份新简历
-app.post('/api/resumes/import', requireResumeQuota, upload.single('file'), fixUploadName, async (req, res, next) => {
+app.post('/api/resumes/import', requireResumeQuota, (req, res, next) => isMock ? next() : requireAIQuota(req, res, next), upload.single('file'), fixUploadName, async (req, res, next) => {
   try {
     const file = req.file
     if (!file) return res.status(400).json({ error: '未收到文件' })

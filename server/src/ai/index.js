@@ -117,6 +117,7 @@ export async function chat({ system, prompt, kind = 'general', json = false } = 
     return local === undefined ? mockChat({ system, prompt, kind, json }) : local
   }
 
+  if ((String(system || '').length + String(prompt || '').length) > 64000) throw Object.assign(new Error('内容过长，请精简后重试'), { status: 400 })
   rollDay()
   // 熔断：当日真实调用超上限 → 拒绝请求，防止失控烧钱
   if (config.ai.dailyLimit > 0 && stats.todayCalls >= config.ai.dailyLimit) {

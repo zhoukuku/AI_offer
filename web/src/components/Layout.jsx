@@ -96,7 +96,7 @@ export default function Layout() {
               <div className="plan-row">
                 <div className="plan-info">
                   <span className={`plan-chip-badge${quota.effective === 'pro' ? ' pro' : ''}`}>{planLabel}</span>
-                  {showUpgrade && <span className="plan-chip-sub">剩余 AI {quota.aiRemaining === -1 ? '不限' : quota.aiRemaining} 次</span>}
+                  {<span className="plan-chip-sub">剩余 AI {quota.aiRemaining === -1 ? '不限' : quota.aiRemaining} 次</span>}
                 </div>
                 {showUpgrade && (
                   <button className="plan-chip-btn" onClick={() => nav('/upgrade')}>
