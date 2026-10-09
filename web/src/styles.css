@@ -1279,3 +1279,13 @@ body { background-image: none; }
 .tpl-card { padding: 0; text-align: left; color: var(--text); }
 .tpl-thumb-inner, .example-thumb-inner { flex-shrink: 0; }
 .tpl-thumb-inner .preview { width: 794px; min-height: 1123px; border-radius: 0; }
+.photo-upload-row { display: flex; align-items: center; gap: 18px; padding-bottom: 20px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+.photo-upload-row p { margin: 4px 0 10px; }
+.photo-upload-preview { width: 78px; height: 100px; flex-shrink: 0; border: 1px dashed #ccd3e0; border-radius: 8px; background: #f4f6fa; display: flex; align-items: center; justify-content: center; color: #a1aabd; overflow: hidden; }
+.photo-upload-preview img { width: 100%; height: 100%; object-fit: contain; }
+.preview .pv-avatar { width: 78px; height: 100px; border-radius: 4px; }
+.preview .pv-avatar img { object-fit: contain; }
+.preview .pv-head-with-photo { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.preview .pv-head-with-photo > div:first-child { min-width: 0; }
+.pv-head-photo-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.preview.tpl-classic .pv-avatar { margin: 0 auto 12px; }

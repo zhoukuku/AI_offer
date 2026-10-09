@@ -47,6 +47,8 @@ export default function Editor() {
   const [resume, setResume] = useState(null)
   const [saved, setSaved] = useState(true)
   const [saving, setSaving] = useState(false)
+  const photoInput = useRef(null)
+  const [photoLoading, setPhotoLoading] = useState(false)
   const latest = useRef(null)
   const dirty = useRef(false)
   const writes = useRef(Promise.resolve())
@@ -115,6 +117,34 @@ export default function Editor() {
 
   function patch(fn) { setResume((p) => fn(structuredClone(p))); setSaved(false) }
 
+  async function uploadPhoto(file) {
+    if (!file) return
+    setError('')
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setError('请选择不超过 5 MB 的 JPG、PNG 或 WebP 照片')
+      if (photoInput.current) photoInput.current.value = ''
+      return
+    }
+    setPhotoLoading(true)
+    const url = URL.createObjectURL(file)
+    try {
+      const image = new Image()
+      image.src = url
+      await image.decode()
+      const ratio = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio))
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio))
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+      const avatar = canvas.toDataURL('image/jpeg', .88)
+      patch(d => { d.basics.avatar = avatar; return d })
+    } catch { setError('照片无法读取，请选择有效的图片文件') }
+    finally { URL.revokeObjectURL(url); setPhotoLoading(false); if (photoInput.current) photoInput.current.value = '' }
+  }
+
   async function save() {
     const snapshot = latest.current
     if (!snapshot) return
@@ -133,7 +163,7 @@ export default function Editor() {
       const r = await api.generate(genForm)
       if ((resume.summary || resume.experience?.length) && !window.confirm('生成稿将替换正文，请核实。确认后会保存原文快照。')) return
       const backup = {id:'v'+Date.now(),name:'生成前备份',createdAt:Date.now(),content:pickContent(resume)}
-      setResume((old) => ({ ...old, ...normalizeResume(r), versions:[...(old.versions || []),backup], updatedAt: Date.now() }))
+      setResume((old) => ({ ...old, ...normalizeResume(r), basics: {...normalizeResume(r).basics, avatar: old.basics?.avatar || ''}, versions:[...(old.versions || []),backup], updatedAt: Date.now() }))
       setSaved(false)
       setGenOpen(false)
     } catch (e) { setError(e.message) } finally { setGenLoading(false) }
@@ -175,33 +205,6 @@ export default function Editor() {
       // 应用后从改进清单中移除该项
       setScoreData((s) => s ? { ...s, improvements: s.improvements.filter((x) => x.id !== item.id) } : s)
     } catch (e) { setError(e.message) } finally { setApplyingId('') }
-  }
-
-  async function saveAsVersion() {
-    if (!resume) return
-    const name = window.prompt('保存为新版本，请命名（如「前端岗版」）', `版本 ${(resume.versions || []).length + 1}`)
-    if (!name || !name.trim()) return
-    const v = { id: 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name.trim(), createdAt: Date.now(), content: pickContent(resume) }
-    const versions = [...(resume.versions || []), v]
-    setError('')
-    try {
-      // 连同当前正文一起持久化，避免快照与工作区内容不一致
-      await persist({ ...pickContent(resume), versions })
-      setResume((p) => ({ ...p, versions }))
-      setSaved(true)
-    } catch (e) { setError(e.message) }
-  }
-
-  async function switchVersion(vid) {
-    const v = (resume.versions || []).find((x) => x.id === vid)
-    if (!v || !resume) return
-    if (!saved && !window.confirm('当前有未保存的修改，切换版本将覆盖，是否继续？')) return
-    setError('')
-    setResume((p) => ({ ...p, ...pickContent(v.content), versions: p.versions || [] }))
-    try {
-      await persist(pickContent(v.content))
-      setSaved(true)
-    } catch (e) { setError(e.message) }
   }
 
   async function doDuplicate() {
@@ -265,7 +268,7 @@ export default function Editor() {
       const chinese = (String(resume?.summary || '') + String(resume?.basics?.title || '')).match(/[\u4e00-\u9fa5]/g)?.length || 0
       const target = chinese > 0 ? 'en' : 'zh'
       const r = await api.translate({ resume: pickContent(resume), target })
-      setResume((old) => ({ ...old, ...normalizeContent(r), updatedAt: Date.now() }))
+      setResume((old) => ({ ...old, ...normalizeContent(r), basics: {...normalizeContent(r).basics, avatar: old.basics?.avatar || ''}, updatedAt: Date.now() }))
       setSaved(false)
     } catch (e) { setError(e.message) } finally { setTransLoading(false) }
   }
@@ -338,23 +341,6 @@ export default function Editor() {
         <div className="toolbar-divider" />
 
         <div className="toolbar-section">
-          <span className="toolbar-label">版本</span>
-          <select
-            className="input version-select"
-            value=""
-            onChange={(e) => e.target.value && switchVersion(e.target.value)}
-          >
-            <option value="" disabled>切换版本…</option>
-            {(resume.versions || []).map((v) => (
-              <option key={v.id} value={v.id}>{v.name}</option>
-            ))}
-          </select>
-          <button className="btn btn-sm btn-ghost" onClick={saveAsVersion} title="把当前内容保存为一个新版本"><Icon name="plus" size={14} /></button>
-        </div>
-
-        <div className="toolbar-divider" />
-
-        <div className="toolbar-section">
           <button className="btn btn-sm" onClick={() => setTplOpen(true)}>
             <Icon name="layout" size={14} />模板 · {TEMPLATES.find((t) => t.key === template)?.label || '经典单栏'}
           </button>
@@ -389,6 +375,18 @@ export default function Editor() {
         <div className="editor-form">
           <div className="editor-outline no-print" aria-label="编辑章节">{["基本信息", "个人总结", "工作经历", "教育经历", "项目经历", "技能", "荣誉奖项"].map(title => <button key={title} onClick={() => document.getElementById(`edit-${title}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{title}</button>)}</div>
           <Section title="基本信息">
+            <div className="photo-upload-row">
+              <div className="photo-upload-preview">{b.avatar ? <img src={b.avatar} alt="简历照片" /> : <Icon name="image" size={27} />}</div>
+              <div>
+                <strong>简历照片</strong>
+                <p className="muted small">选填 · JPG / PNG / WebP，最大 5 MB</p>
+                <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" aria-label="上传简历照片" hidden onChange={e => uploadPhoto(e.target.files?.[0])} />
+                <div className="flex gap-8">
+                  <button className="btn btn-sm" disabled={photoLoading} onClick={() => photoInput.current?.click()}>{photoLoading ? '处理中…' : b.avatar ? '替换照片' : '上传照片'}</button>
+                  {b.avatar && <button className="btn btn-sm btn-ghost" onClick={() => patch(d => { d.basics.avatar = ''; return d })}>移除照片</button>}
+                </div>
+              </div>
+            </div>
             <div className="row-2">
               <Field label="姓名"><input className="input" value={b.name || ''} onChange={(e) => patch((d) => { d.basics.name = e.target.value; return d })} /></Field>
               <Field label="求职意向 / 职位"><input className="input" value={b.title || ''} onChange={(e) => patch((d) => { d.basics.title = e.target.value; return d })} /></Field>

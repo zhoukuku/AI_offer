@@ -226,7 +226,7 @@ export default function Dashboard() {
                 <button className="btn btn-sm btn-ghost" title="复制简历" onClick={(e) => duplicate(r, e)}><Icon name="copy" size={13} /></button>
                 <button className="btn btn-sm btn-danger" onClick={(e) => remove(r.id, e)}>删除</button>
               </div>
-              <div className="rc-name"><button className="resume-title-link" onClick={() => nav(`/resume/${r.id}`)}>{r.name}</button>{r.versionCount > 0 && <span className="badge badge-gray rc-version">{r.versionCount} 个版本</span>}</div>
+              <div className="rc-name"><button className="resume-title-link" onClick={() => nav(`/resume/${r.id}`)}>{r.name}</button></div>
               <div className="rc-person">{r.name2 || '未填写姓名'}{r.title ? ` · ${r.title}` : ''}</div>
               <div className="rc-time">更新于 {formatTime(r.updatedAt)}</div>
             </div>

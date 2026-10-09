@@ -149,7 +149,7 @@ export function Preview({ resume, template = 'single', accent = '#4f46e5' }) {
   // ---- 页眉变体 ----
   const nameEl = <h1 className="pv-name">{b.name || '你的姓名'}</h1>
   const titleEl = b.title ? <div className="pv-title">{b.title}</div> : null
-  const avatarEl = b.avatar ? <div className="pv-avatar"><img src={b.avatar} alt="" /></div> : null
+  const avatarEl = b.avatar ? <div className="pv-avatar"><img src={b.avatar} alt="简历照片" /></div> : null
 
   let header
   switch (traits.header) {
@@ -157,7 +157,7 @@ export function Preview({ resume, template = 'single', accent = '#4f46e5' }) {
       header = <div className="pv-banner">{avatarEl}<div>{nameEl}{titleEl}{contacts.length > 0 && contactBlock('banner')}</div></div>
       break
     case 'plate':
-      header = <div className="pv-plate"><div className="pv-plate-left">{nameEl}{titleEl}</div>{contacts.length > 0 && contactBlock('plate')}</div>
+      header = <div className="pv-plate"><div className="pv-plate-left">{nameEl}{titleEl}</div><div className="pv-head-photo-side">{avatarEl}{contacts.length > 0 && contactBlock('plate')}</div></div>
       break
     case 'center':
       header = <div className="pv-head-center">{avatarEl}{nameEl}{titleEl}{contacts.length > 0 && contactBlock('center')}</div>
@@ -166,12 +166,12 @@ export function Preview({ resume, template = 'single', accent = '#4f46e5' }) {
       header = (
         <div className="pv-head-split">
           <div>{nameEl}{titleEl}</div>
-          {contacts.length > 0 && contactBlock('stack')}
+          <div className="pv-head-photo-side">{avatarEl}{contacts.length > 0 && contactBlock('stack')}</div>
         </div>
       )
       break
     default: // left
-      header = <div className="pv-head">{nameEl}{titleEl}{contacts.length > 0 && contactBlock('row')}</div>
+      header = <div className="pv-head pv-head-with-photo"><div>{nameEl}{titleEl}{contacts.length > 0 && contactBlock('row')}</div>{avatarEl}</div>
   }
 
   // ---- 版式骨架 ----

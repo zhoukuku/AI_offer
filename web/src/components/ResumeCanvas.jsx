@@ -45,6 +45,5 @@ export default function ResumeCanvas({ resume, template, accent }) {
         </div>
       </div>
     </div>
-    <div className="canvas-foot no-print">实时同步编辑内容 · PDF 导出时自动分页{pages > 1 ? '，建议精简内容；最终页数以导出为准' : ''}</div>
   </section>
 }
