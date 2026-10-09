@@ -81,7 +81,7 @@ const config = {
     // 免费档限制
     free: {
       maxResumes: Number(process.env.FREE_MAX_RESUMES || 3), // 免费档可同时保留的简历数
-      aiQuota: Number(process.env.FREE_AI_QUOTA || 5), // 免费档 AI 免费试用总次数（会员期不受限）
+      aiQuota: Number(process.env.FREE_AI_QUOTA || 2), // 免费档 AI 免费试用总次数（会员期不受限）
     },
     pro: { aiQuota: Number(process.env.PRO_AI_QUOTA || 100), dailyQuota: Number(process.env.AI_USER_DAILY_QUOTA || 20) },
     // 会员套餐（价格单位：分）
