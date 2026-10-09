@@ -8,11 +8,13 @@ import Companies from './pages/Companies.jsx'
 import Applications from './pages/Applications.jsx'
 import Interviews from './pages/Interviews.jsx'
 import CoverLetter from './pages/CoverLetter.jsx'
+import Greeting from './pages/Greeting.jsx'
 import Login from './pages/Login.jsx'
 import Landing from './pages/Landing.jsx'
 import Upgrade from './pages/Upgrade.jsx'
 import Admin from './pages/Admin.jsx'
 import ShareView from './pages/ShareView.jsx'
+import Examples from './pages/Examples.jsx'
 import { getToken, getStoredUser } from './api.js'
 
 // 登录守卫：未登录跳转登录页
@@ -50,6 +52,8 @@ export default function App() {
         <Route path="/applications" element={<Applications />} />
         <Route path="/interviews" element={<Interviews />} />
         <Route path="/cover" element={<CoverLetter />} />
+        <Route path="/greet" element={<Greeting />} />
+        <Route path="/examples" element={<Examples />} />
         <Route path="/upgrade" element={<Upgrade />} />
         <Route path="/admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
       </Route>

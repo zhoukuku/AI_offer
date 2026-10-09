@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api.js'
+import { api, getStoredUser } from '../api.js'
 import Icon from '../components/Icon.jsx'
 
 const FINAL_STATUS = ['Offer', '已拒绝']
@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [interviews, setInterviews] = useState([])
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
+  const [user, setUser] = useState(getStoredUser())
 
   function load() { api.listResumes().then(setList).catch((e) => setError(e.message)) }
 
@@ -136,26 +137,22 @@ export default function Dashboard() {
 
   return (
     <div>
-      {/* 英雄区 */}
-      <div className="hero">
-        <h1>让每一份简历都更出彩 ✦</h1>
-        <p>从零生成、AI 对话优化、岗位适配、投递跟踪与面试复盘——一站式 AI 求职工作台，助你高效拿下心仪 Offer。</p>
-        <div className="hero-actions">
-          <button className="btn btn-light" onClick={create}><Icon name="plus" size={16} />新建简历</button>
-          <button className="btn btn-ghost-white" onClick={() => fileRef.current?.click()} disabled={importing}>
-            <Icon name="image" size={16} />{importing ? '导入中…' : '导入旧简历'}
-          </button>
-          <button className="btn btn-ghost-white" onClick={() => nav('/match')}><Icon name="target" size={16} />岗位适配</button>
-          <button className="btn btn-ghost-white" onClick={() => nav('/cover')}><Icon name="pencil" size={16} />求职信</button>
+      {/* 页面头部：统一的页头规则 */}
+      <div className="page-header page-header-row">
+        <div className="page-header-left">
+          <div className="page-header-title">
+            <h1>工作台</h1>
+            <p>欢迎回来，{user?.nickname || '同学'}。今天是 {new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}，继续推进你的求职进度吧。</p>
+          </div>
         </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.webp"
-          style={{ display: 'none' }}
-          onChange={pickFile}
-        />
-        {importing && <div className="muted small" style={{ marginTop: 8 }}>正在解析旧简历并自动填写…</div>}
+        <div className="page-header-actions">
+          <button className="btn" onClick={() => fileRef.current?.click()} disabled={importing}>
+            <Icon name="image" size={15} />{importing ? '导入中…' : '导入旧简历'}
+          </button>
+          <button className="btn btn-primary" onClick={create}>
+            <Icon name="plus" size={15} />新建简历
+          </button>
+        </div>
       </div>
 
       {/* 统计 */}
@@ -281,13 +278,55 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="flex-between" style={{ marginBottom: 14, marginTop: 8 }}>
-        <h2 style={{ margin: 0, fontSize: 17, fontWeight: 650 }}>我的简历</h2>
-        <span className="muted small">管理你的多份简历</span>
+      <div className="page-header-row section-header-row">
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>我的简历 <span className="muted small" style={{ marginLeft: 8 }}>{list?.length || 0} 份</span></h2>
+        <div className="page-header-actions">
+          <button className="btn btn-sm" onClick={() => fileRef.current?.click()} disabled={importing}>
+            <Icon name="image" size={14} />{importing ? '导入中…' : '导入旧简历'}
+          </button>
+        </div>
       </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.webp"
+        style={{ display: 'none' }}
+        onChange={pickFile}
+      />
 
       {list === null ? (
         <div className="loading">加载中…</div>
+      ) : list.length === 0 ? (
+        <div className="empty-state card">
+          <div className="empty-state-art">
+            <svg viewBox="0 0 80 80" width="80" height="80" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="14" y="10" width="44" height="56" rx="6" fill="url(#g1)" />
+              <rect x="22" y="6" width="44" height="56" rx="6" fill="#fff" stroke="url(#g1)" strokeWidth="1.5" />
+              <rect x="30" y="18" width="28" height="3" rx="1.5" fill="#cbd5e1" />
+              <rect x="30" y="26" width="22" height="3" rx="1.5" fill="#e2e8f0" />
+              <rect x="30" y="36" width="28" height="3" rx="1.5" fill="#cbd5e1" />
+              <rect x="30" y="44" width="18" height="3" rx="1.5" fill="#e2e8f0" />
+              <rect x="30" y="54" width="28" height="3" rx="1.5" fill="#cbd5e1" />
+              <circle cx="56" cy="14" r="11" fill="var(--primary)" />
+              <path d="M52 14h8M56 10v8" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+              <defs>
+                <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#6366f1" />
+                  <stop offset="1" stopColor="#8b5cf6" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <div className="empty-state-title">还没有简历，开始你的第一份吧</div>
+          <div className="empty-state-sub">从零生成 AI 智能填充，或导入你已有的简历（PDF / Word / 图片自动识别）</div>
+          <div className="empty-state-actions">
+            <button className="btn btn-primary" onClick={create}><Icon name="plus" size={15} />从零生成</button>
+            <button className="btn" onClick={() => fileRef.current?.click()} disabled={importing}>
+              <Icon name="image" size={15} />{importing ? '导入中…' : '导入旧简历'}
+            </button>
+            <button className="btn btn-ghost" onClick={() => nav('/examples')}><Icon name="star" size={15} />参考范文</button>
+          </div>
+        </div>
       ) : (
         <div className="resume-grid">
           {list.map((r) => (

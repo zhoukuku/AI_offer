@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import Icon from '../components/Icon.jsx'
+import { Preview } from '../components/Preview.jsx'
+import { TEMPLATES, getTemplate } from '../templates.js'
 
 const EMPTY_EXP = { company: '', role: '', start: '', end: '', city: '', bullets: '' }
 const EMPTY_EDU = { school: '', degree: '', major: '', start: '', end: '' }
@@ -58,11 +60,24 @@ export default function Editor() {
   const [dupLoading, setDupLoading] = useState(false)
   const [transLoading, setTransLoading] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [tplOpen, setTplOpen] = useState(false)
   const [shareData, setShareData] = useState(null)
   const [shareLoading, setShareLoading] = useState(false)
 
+  // 一键优化闭环（评分 → 逐条优化应用 → 保存 → 复检）
+  const [optOpen, setOptOpen] = useState(false)
+  const [optStep, setOptStep] = useState(0) // 0 未开始 1 评分 2 优化应用 3 保存 4 完成
+  const [optBefore, setOptBefore] = useState(null)
+  const [optAfter, setOptAfter] = useState(null)
+  const [optCount, setOptCount] = useState(0)
+  const [optErr, setOptErr] = useState('')
+
   useEffect(() => {
-    api.getResume(id).then(setResume).catch((e) => setError(e.message))
+    api.getResume(id).then((r) => {
+      setResume(r)
+      setTemplate(r.template || 'single')
+      setAccent(r.accent || '#4f46e5')
+    }).catch((e) => setError(e.message))
   }, [id])
 
   function patch(fn) { setResume((p) => fn(structuredClone(p))); setSaved(false) }
@@ -160,6 +175,47 @@ export default function Editor() {
     } catch (e) { setError(e.message) } finally { setDupLoading(false) }
   }
 
+  async function doOneClickOptimize() {
+    if (optOpen) return
+    setOptOpen(true); setOptErr(''); setOptStep(1); setOptBefore(null); setOptAfter(null); setOptCount(0)
+    setError('')
+    try {
+      // 步骤 1：评分诊断
+      const s1 = await api.score({ resume })
+      setOptBefore(s1.overall)
+      const items = s1.improvements || []
+      if (items.length === 0) { setOptStep(4); setOptAfter(s1.overall); return }
+
+      // 步骤 2：逐条调用优化并应用到副本
+      setOptStep(2)
+      const next = structuredClone(resume)
+      for (const it of items) {
+        try {
+          const r = await api.optimize({ resume: next, target: it.target })
+          const text = typeof r === 'string' ? r : r.text || ''
+          const t = it.target || {}
+          if (t.type === 'experience' && next.experience?.[t.index]) next.experience[t.index].bullets = text
+          else if (t.type === 'projects' && next.projects?.[t.index]) next.projects[t.index].description = text
+          else next.summary = text
+        } catch { /* 单条失败跳过，不影响其余项 */ }
+      }
+      setOptCount(items.length)
+
+      // 步骤 3：保存
+      setOptStep(3)
+      setResume(next)
+      await api.updateResume(id, pickContent(next))
+      setSaved(true)
+
+      // 步骤 4：复检评分
+      setOptStep(4)
+      const s2 = await api.score({ resume: next })
+      setOptAfter(s2.overall)
+    } catch (e) {
+      setOptErr(e.message || '一键优化失败')
+    }
+  }
+
   async function doTranslate() {
     setTransLoading(true); setError('')
     try {
@@ -203,29 +259,41 @@ export default function Editor() {
   const b = resume.basics || {}
 
   return (
-    <div>
-      <div className="page-header flex-between">
-        <div>
-          <div className="flex-center gap-8">
-            <button className="btn btn-sm btn-ghost" onClick={() => nav('/app')}><Icon name="arrowLeft" size={16} />返回</button>
-            <h1 style={{ margin: 0 }}>{resume.name}</h1>
-            {saved ? <span className="badge badge-green">已保存</span> : <span className="badge badge-orange">未保存</span>}
+    <div className="editor-page">
+      <div className="page-header page-header-row">
+        <div className="page-header-left">
+          <button className="btn btn-sm btn-ghost" onClick={() => nav('/app')} aria-label="返回">
+            <Icon name="arrowLeft" size={16} />返回
+          </button>
+          <div className="page-header-title">
+            <div className="page-header-h1">
+              <h1>{resume.name}</h1>
+              {saved ? <span className="badge badge-green">已保存</span> : <span className="badge badge-orange">未保存</span>}
+            </div>
+            <p>左侧结构化编辑，右侧实时预览；支持切换模板与主题色，一键导出 PDF。</p>
           </div>
-          <p className="mt-8">左侧结构化编辑，右侧实时预览；支持切换简历模板与主题色，一键导出 PDF。</p>
+        </div>
+        <div className="page-header-actions">
+          <button className="btn" onClick={doScore} disabled={scoreLoading}><Icon name="activity" size={15} />{scoreLoading ? '体检中…' : 'AI 体检'}</button>
+          <button className="btn" onClick={doDuplicate} disabled={dupLoading}><Icon name="search" size={15} />{dupLoading ? '查重中…' : '查重'}</button>
+          <button className="btn" onClick={doTranslate} disabled={transLoading}><Icon name="refresh" size={15} />{transLoading ? '翻译中…' : '中英互译'}</button>
+          <button className="btn" onClick={openShare} disabled={shareLoading}><Icon name="send" size={15} />{shareLoading ? '生成中…' : '分享投递'}</button>
         </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
-      {/* 工具栏：生成 / 保存 / 模板 / 主题色 / 导出 */}
+      {/* 工具栏：分主区/版本/模板/主题/导出 五段，主操作靠右更醒目 */}
       <div className="editor-toolbar">
-        <button className="btn btn-primary" onClick={() => setGenOpen(true)}><Icon name="sparkles" size={16} />从零生成简历</button>
-        <button className="btn" onClick={save} disabled={saved}><Icon name="check" size={16} />保存</button>
-        <button className="btn" onClick={doScore} disabled={scoreLoading}><Icon name="activity" size={16} />{scoreLoading ? '体检中…' : 'AI 体检'}</button>
-        <button className="btn" onClick={doDuplicate} disabled={dupLoading}><Icon name="search" size={16} />{dupLoading ? '查重中…' : '查重'}</button>
-        <button className="btn" onClick={doTranslate} disabled={transLoading}><Icon name="refresh" size={16} />{transLoading ? '翻译中…' : '中英互译'}</button>
+        <div className="toolbar-section toolbar-main">
+          <button className="btn btn-primary" onClick={() => setGenOpen(true)}><Icon name="sparkles" size={16} />从零生成</button>
+          <button className="btn btn-primary-soft" onClick={doOneClickOptimize} disabled={optOpen}><Icon name="wand" size={16} />一键优化</button>
+          <button className="btn" onClick={save} disabled={saved}><Icon name="check" size={16} />{saved ? '已保存' : '保存'}</button>
+        </div>
 
-        <div className="toolbar-group">
+        <div className="toolbar-divider" />
+
+        <div className="toolbar-section">
           <span className="toolbar-label">版本</span>
           <select
             className="input version-select"
@@ -240,16 +308,15 @@ export default function Editor() {
           <button className="btn btn-sm btn-ghost" onClick={saveAsVersion} title="把当前内容保存为一个新版本"><Icon name="plus" size={14} /></button>
         </div>
 
-        <div className="toolbar-group">
-          <span className="toolbar-label">模板</span>
-          <div className="seg">
-            <button className={template === 'single' ? 'active' : ''} onClick={() => setTemplate('single')}>单栏</button>
-            <button className={template === 'double' ? 'active' : ''} onClick={() => setTemplate('double')}>双栏</button>
-          </div>
+        <div className="toolbar-divider" />
+
+        <div className="toolbar-section">
+          <button className="btn btn-sm" onClick={() => setTplOpen(true)}>
+            <Icon name="layout" size={14} />模板 · {TEMPLATES.find((t) => t.key === template)?.label || '经典单栏'}
+          </button>
         </div>
 
-        <div className="toolbar-group">
-          <span className="toolbar-label">主题色</span>
+        <div className="toolbar-section">
           <div className="color-dots">
             {THEMES.map((t) => (
               <span
@@ -257,15 +324,16 @@ export default function Editor() {
                 className={`color-dot${accent === t.color ? ' active' : ''}`}
                 style={{ background: t.color }}
                 title={t.label}
-                onClick={() => setAccent(t.color)}
+                onClick={() => { setAccent(t.color); api.updateResume(id, { accent: t.color }).catch((err) => setError(err.message)) }}
               />
             ))}
           </div>
         </div>
 
-        <div className="toolbar-group">
-          <button className="btn" onClick={openShare} disabled={shareLoading}><Icon name="send" size={16} />{shareLoading ? '生成中…' : '分享投递'}</button>
-          <button className="btn" onClick={() => window.print()}><Icon name="download" size={16} />导出 PDF</button>
+        <div className="toolbar-spacer" />
+
+        <div className="toolbar-section">
+          <button className="btn btn-primary" onClick={() => window.print()}><Icon name="download" size={15} />导出 PDF</button>
         </div>
       </div>
 
@@ -505,6 +573,43 @@ export default function Editor() {
         </div>
       )}
 
+      {tplOpen && (
+        <div className="modal-mask" onClick={() => setTplOpen(false)}>
+          <div className="modal" style={{ maxWidth: 860 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span><Icon name="image" size={16} />选择简历模板</span>
+              <button className="icon-btn" onClick={() => setTplOpen(false)}><Icon name="x" size={16} /></button>
+            </div>
+            <div className="modal-body" style={{ maxHeight: '72vh', overflow: 'auto' }}>
+              <p className="muted small" style={{ marginTop: 0 }}>以下为你的简历在 9 套模板下的实时效果，点击即可切换（自动保存）。模板差异体现在版式结构上，主题色可在工具栏单独调整。</p>
+              <div className="tpl-grid">
+                {TEMPLATES.map((t) => (
+                  <div
+                    key={t.key}
+                    className={`tpl-card${template === t.key ? ' active' : ''}`}
+                    onClick={() => {
+                      setTemplate(t.key)
+                      api.updateResume(id, { template: t.key }).catch((err) => setError(err.message))
+                      setTplOpen(false)
+                    }}
+                  >
+                    <div className="tpl-thumb">
+                      <div className="tpl-thumb-inner">
+                        <Preview resume={resume} template={t.key} accent={accent} />
+                      </div>
+                    </div>
+                    <div className="tpl-meta">
+                      <b>{t.label}{template === t.key ? ' ✓' : ''}</b>
+                      <span>{t.desc}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {shareOpen && (
         <div className="modal-mask" onClick={() => setShareOpen(false)}>
           <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
@@ -535,6 +640,51 @@ export default function Editor() {
           </div>
         </div>
       )}
+
+      {optOpen && (
+        <div className="modal-mask" onClick={() => setOptOpen(false)}>
+          <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span><Icon name="sparkles" size={16} />一键优化整份简历</span>
+              <span style={{ cursor: 'pointer' }} onClick={() => setOptOpen(false)}><Icon name="x" size={18} /></span>
+            </div>
+            <div className="modal-body">
+              <ol className="opt-steps">
+                {['评分诊断', '逐条优化应用', '保存修改', '复检评分'].map((label, i) => {
+                  const n = i + 1
+                  const state = optStep > n ? 'done' : optStep === n ? 'active' : 'todo'
+                  return (
+                    <li key={n} className={`opt-step ${state}`}>
+                      <span className="opt-dot">{state === 'done' ? <Icon name="check" size={12} /> : n}</span>
+                      <span>{label}</span>
+                      {n === 1 && optBefore != null && <b className="opt-score">初始 {optBefore}</b>}
+                      {n === 4 && optAfter != null && <b className="opt-score">复检 {optAfter}</b>}
+                    </li>
+                  )
+                })}
+              </ol>
+
+              {optErr && <div className="error-banner">{optErr}</div>}
+
+              {optStep === 4 && (
+                <div className="opt-result">
+                  {optCount === 0 ? (
+                    <p className="muted small">当前简历已无明显可优化项，保持原样 🎉 你也可以继续手动微调。</p>
+                  ) : (
+                    <p className="muted small">
+                      已自动应用 <b>{optCount}</b> 项优化{optBefore != null && optAfter != null ? `，评分 ${optBefore} → ${optAfter}` : ''}。左侧已更新为改写后的内容，可继续手动打磨。
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="modal-foot">
+              <button className="btn" onClick={() => setOptOpen(false)}>关闭</button>
+              {optStep === 4 && <button className="btn btn-primary" onClick={() => nav('/app')}>去我的简历</button>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -559,85 +709,4 @@ function Field({ label, children }) {
   return <div className="field"><label className="label">{label}</label>{children}</div>
 }
 
-export function Preview({ resume, template = 'single', accent = '#4f46e5' }) {
-  const b = resume.basics || {}
-  const helper = (v) => Array.isArray(v) ? v : v ? String(v).split('\n').filter(Boolean) : []
-
-  const header = (
-    <>
-      <h1 className="pv-name">{b.name || '你的姓名'}</h1>
-      <div className="pv-title">{b.title || '求职意向'}</div>
-      {(b.phone || b.email || b.city || b.website) && (
-        <div className="pv-contact">{[b.city, b.phone, b.email, b.website].filter(Boolean).join(' · ')}</div>
-      )}
-    </>
-  )
-
-  const summary = resume.summary ? (
-    <section className="pv-section"><div className="pv-h">个人总结</div><p style={{ margin: 0, fontSize: 13 }}>{resume.summary}</p></section>
-  ) : null
-
-  const experience = (resume.experience || []).length > 0 ? (
-    <section className="pv-section">
-      <div className="pv-h">工作经历</div>
-      {resume.experience.map((e, i) => (
-        <div className="pv-item" key={i}>
-          <div className="pv-item-head"><b>{e.company || '公司'}{e.role ? ` · ${e.role}` : ''}</b><span>{[e.start, e.end].filter(Boolean).join(' - ')}</span></div>
-          {e.city && <div className="pv-item-sub">{e.city}</div>}
-          {helper(e.bullets).length > 0 && <ul>{helper(e.bullets).map((l, j) => <li key={j}>{l}</li>)}</ul>}
-        </div>
-      ))}
-    </section>
-  ) : null
-
-  const projects = (resume.projects || []).length > 0 ? (
-    <section className="pv-section">
-      <div className="pv-h">项目经历</div>
-      {resume.projects.map((p, i) => (
-        <div className="pv-item" key={i}>
-          <div className="pv-item-head"><b>{p.name || '项目'}{p.role ? ` · ${p.role}` : ''}</b><span>{[p.start, p.end].filter(Boolean).join(' - ')}</span></div>
-          {p.tech && <div className="pv-item-sub">{p.tech}</div>}
-          {p.description && <div style={{ fontSize: 13 }}>{p.description}</div>}
-        </div>
-      ))}
-    </section>
-  ) : null
-
-  const skills = (resume.skills || []).length > 0 ? (
-    <section className="pv-section">
-      <div className="pv-h">技能</div>
-      <div className="pv-skills">{resume.skills.map((s, i) => <span className="pv-skill" key={i}>{s}</span>)}</div>
-    </section>
-  ) : null
-
-  const education = (resume.education || []).length > 0 ? (
-    <section className="pv-section">
-      <div className="pv-h">教育经历</div>
-      {resume.education.map((e, i) => (
-        <div className="pv-item" key={i}>
-          <div className="pv-item-head"><b>{e.school || '学校'}</b><span>{[e.start, e.end].filter(Boolean).join(' - ')}</span></div>
-          <div className="pv-item-sub">{[e.degree, e.major].filter(Boolean).join(' · ')}</div>
-        </div>
-      ))}
-    </section>
-  ) : null
-
-  const honors = (resume.honors || []).length > 0 ? (
-    <section className="pv-section">
-      <div className="pv-h">荣誉奖项</div>
-      <ul>{resume.honors.map((h, i) => <li key={i}>{h}</li>)}</ul>
-    </section>
-  ) : null
-
-  const main = <>{summary}{experience}{projects}</>
-  const aside = <>{skills}{education}{honors}</>
-
-  return (
-    <div className={`preview${template === 'double' ? ' pv-double' : ''}`} style={{ '--resume-accent': accent }}>
-      {header}
-      {template === 'double'
-        ? <div className="pv-main"><div>{main}</div><div className="pv-aside">{aside}</div></div>
-        : <>{main}{aside}</>}
-    </div>
-  )
-}
+export { Preview } from '../components/Preview.jsx'

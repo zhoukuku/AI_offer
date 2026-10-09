@@ -96,40 +96,98 @@ function buildResume(basics) {
 // 从 JD 文本中提取目标岗位与高频关键词，用于 mock 的"转行适配"演示
 function extractJd(jdText) {
   const jd = String(jdText || '')
-  const roleMatch =
-    jd.match(/【职位】\s*([^\n（(]+)/) ||
-    jd.match(/(?:职位|岗位|title)\s*[:：]\s*([^\n，,]+)/)
-  const role = roleMatch ? roleMatch[1].trim() : ''
+  // 岗位名：兼容多种格式
+  //  1) 标题行命中职位词，如 "Agent算法工程师-AI Platform"、"高级后端开发工程师"
+  //  2) 【职位】xxx
+  //  3) 职位/岗位/title: xxx
+  //  4) 赛道分类行 "研发 - 算法" → 取后半段 "算法"
+  let role = ''
+  const titleLine = jd.split('\n').map((s) => s.trim()).find((l) => {
+    if (l.length < 3 || l.length > 40) return false
+    return /(工程师|算法|开发|产品|运营|设计|架构师|专家|分析师|研究员|科学家|经理|主管|专员|顾问|教师|医生|护士)/.test(l)
+  })
+  if (titleLine) {
+    role = titleLine.replace(/\s*[-—–]\s*(AI\s*Platform|Platform|平台).*$/i, '').trim()
+    const parts = role.split(/\s*[-—–]\s*/)
+    if (parts.length > 1 && /^(研发|技术|业务|产品|职能|部门)$/i.test(parts[0])) role = parts.slice(1).join(' - ')
+  }
+  if (!role) {
+    const m = jd.match(/【职位】\s*([^\n（(]+)/) || jd.match(/(?:职位|岗位|title)\s*[:：]\s*([^\n，,]+)/)
+    role = m ? m[1].trim() : ''
+  }
   const POOL = [
     'TypeScript', 'JavaScript', 'React', 'Vue', 'Node.js', 'Java', 'Python', 'Go',
     '小程序', '微前端', '跨端', '性能优化', '工程化', '组件库', '自动化测试',
     '监控', '高并发', '微服务', '数据库', 'Redis', '算法', '机器学习', '深度学习',
     '数据分析', 'SQL', '产品', '运营', '项目管理', '供应链', '金融', '医疗', '电商',
+    'LangGraph', 'LlamaIndex', 'Agent', 'Prompt', 'LLM', 'Linux', 'SFT', 'RL',
   ]
-  const keywords = POOL.filter((k) => jd.toLowerCase().includes(k.toLowerCase()))
+  // 词边界匹配，避免 "GoogleADK" 误判为 "Go" 等
+  const hasKw = (k) => new RegExp(`(^|[^a-z0-9])${k.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`, 'i').test(jd)
+  const keywords = [...new Set(POOL)].filter(hasKw)
   return { role, keywords }
 }
 
-// 生成一份"对标 JD"的适配简历（演示跨行转行：原经历映射为可迁移能力、术语替换为 JD 关键词）
+// 从一段 bullet 中抽取量化成果（数字/百分比/倍数/从X到Y/QPS从X提升到Y），用于"改写不编造"——真实结果原样保留
+function extractResult(text) {
+  const re = /(?:QPS\s*从\s*[\d.kwKWW万]+\s*(?:提升|增长|提高|上升)\s*到\s*[\d.kwKWW万]+)|(?:从\s*[\d.kwKWW万]+\s*(?:提升|增长|提高|上升|涨)\s*到\s*[\d.kwKWW万]+)|(?:从\s*[\d.kwKWW万]+\s*到\s*[\d.kwKWW万]+)|[\d.]+\s*倍|[\d.]+\s*%|QPS\s*[从到]?\s*[\d.kwKWW万]+|TPS\s*[从到]?\s*[\d.kwKWW万]+|(?:下降|降低|缩短|减少|提高|提升)\s*[\d.]+\s*%/i
+  const m = String(text).match(re)
+  return m ? m[0].replace(/\s+/g, '') : ''
+}
+
+// 抽取 bullet 的"真实工作对象/主题"，用于改写时保留（如"核心交易系统架构""微服务拆分"）
+function extractTopic(text) {
+  const cleaned = String(text)
+    .replace(extractResult(text), '')
+    .replace(/^[，,。；;、\s]+/, '')
+    .replace(/[，,。；;].*$/, '')
+    .trim()
+  return cleaned.length >= 2 ? cleaned.slice(0, 20) : ''
+}
+
+// 生成一份"对标 JD"的适配简历（演示跨行转行）：
+//   ❗公司名 / 职位 / 起止时间 一律原样锁死，绝不改写；
+//   ✅仅把各段工作内容(bullets)按意向 JD 重写，且真实量化成果原样保留，不编造虚假数字。
 function buildAdaptedResume(jd, srcResume) {
   const src = srcResume || {}
   const b = src.basics || {}
-  const srcRole = b.title || '原岗位'
   const jdInfo = extractJd(jd)
-  const role = jdInfo.role || srcRole
-  const kws = jdInfo.keywords.length ? jdInfo.keywords : ['可迁移能力', '跨团队协作', '问题拆解']
-  const topKws = kws.slice(0, 4)
-  const allSkills = [...new Set([...kws, ...(src.skills || [])])].slice(0, 8)
+  const role = jdInfo.role || b.title || '目标岗位'
+  const kws = jdInfo.keywords
+  const srcSkills = (src.skills || []).map((s) => String(s))
+  const norm = (s) => String(s).toLowerCase().trim()
+  // 只把"候选真实具备"的 JD 关键词并入技能，避免硬塞无关词（如算法 JD 里塞 React）
+  const covered = kws.filter((k) => srcSkills.some((s) => norm(s).includes(norm(k)) || norm(k).includes(norm(s))))
+  const skills = [...new Set([...srcSkills, ...covered])].slice(0, 12)
 
-  const summary = `拥有多年跨行业实战经验，现正转向「${role}」方向。具备可迁移的通用能力（${topKws.join('、')}），并已系统补齐目标岗位所需技能，擅长将过往方法论快速复制到新赛道，以结果导向推动目标达成。`
+  const helper = (v) => Array.isArray(v) ? v.filter(Boolean) : v ? String(v).split('\n').map((s) => s.trim()).filter(Boolean) : []
 
-  const experience = (src.experience || []).map((e) => ({
-    ...e,
-    bullets: [
-      `（跨行迁移）在原岗位主导复杂项目从 0 到 1 交付，沉淀出与「${role}」高度可迁移的目标拆解、方案设计与落地执行能力`,
-      `将原业务积累的「${topKws[0] || '核心能力'}」方法论迁移到新岗位，形成可复用的通用解决方案，快速创造价值`,
-    ].join('\n'),
-  }))
+  // 改写用到的 JD 关键词：优先"已覆盖"（真实具备且岗位相关），否则用缺失项点出方向
+  const kwPool = covered.length ? covered : kws
+  const kwFor = (i) => (kwPool[i % (kwPool.length || 1)] || '岗位核心能力')
+
+  // 个人总结：基于真实信息，不写假话
+  const skillText = (covered.length ? covered : srcSkills.slice(0, 4)).join('、')
+  const summary = `${b.name ? b.name + '，' : ''}拥有${b.title ? `「${b.title}」方向` : '多年'}的实战经验，现目标岗位为「${role}」。` +
+    (skillText ? `具备${skillText}等能力，` : '') +
+    `已按「${role}」岗位 JD 重新梳理并改写各段工作内容，突出可迁移经验与岗位匹配度。`
+
+  // 经历：company / role / start / end / city 全部通过 ...e 原样保留（公司名锁死）；
+  //       只重写 bullets —— 保留真实工作对象(topic)与量化成果(result)，改写为对标岗位的语言。
+  const experience = (src.experience || []).map((e, idx) => {
+    const real = helper(e.bullets)
+    const bullets = real.length
+      ? real.map((bl, bi) => {
+          const result = extractResult(bl)
+          const topic = extractTopic(bl) || '原岗位核心工作'
+          const kw = kwFor(idx + bi)
+          return result
+            ? `将「${topic}」经验对标「${role}」岗位重写，保留「${result}」的真实成果，并突出其在${kw}方向上的可迁移价值。`
+            : `将「${topic}」经验对标「${role}」岗位重写，围绕${kw}方向重构描述，突出可迁移能力与岗位匹配度。`
+        })
+      : [`结合原有「${e.role || '相关'}」经验，将工作内容对标「${role}」岗位、向${kwFor(idx)}方向迁移与重构。`]
+    return { ...e, bullets: bullets.join('\n') }
+  })
 
   return {
     basics: { ...b, title: role },
@@ -137,7 +195,7 @@ function buildAdaptedResume(jd, srcResume) {
     experience,
     education: src.education || [],
     projects: src.projects || [],
-    skills: allSkills,
+    skills,
     honors: src.honors || [],
   }
 }
@@ -168,13 +226,16 @@ function pickSection(lines, labelRe) {
 }
 
 // 从文本中抽取表单字段（尽力而为，缺失留空）
+// 设计：按"经历块"而非"逐行"解析。工作经历/教育/项目均以"块"为单位，
+// 块首行携带 公司/职位/时间，块内其余行（•/·/-/数字 或缩进行）收集为 bullets，
+// 从而完整保留工作内容，避免逐行解析导致的字段错位与内容丢失。
 function parseResumeText(text) {
   const src = String(text || '').replace(/\r\n?/g, '\n')
   const lines = src.split('\n').map((s) => s.trim()).filter(Boolean)
 
   const basics = { name: '', title: '', phone: '', email: '', city: '', website: '', avatar: '' }
 
-  // 电话
+  // 电话（支持 138-1234-5678 / 138 1234 5678 / 13812345678）
   const phoneLine = lines.find((l) => /(电话|手机|联系方式|电话号|tel|phone|mobile)/i.test(l)) || ''
   const phoneMatch = (phoneLine + '\n' + src).match(/1[3-9]\d[\s-]?\d{4}[\s-]?\d{4}/)
   if (phoneMatch) basics.phone = phoneMatch[0].replace(/[\s-]/g, '').slice(0, 11)
@@ -201,11 +262,13 @@ function parseResumeText(text) {
   const webMatch = src.match(/https?:\/\/[^\s，,；;]+/)
   if (webMatch) basics.website = webMatch[0]
 
-  // 教育
-  const education = pickSection(lines, /教育|学历|校园|学习经历|毕业院校/).map((l) => {
+  // 教育（按块：一段教育经历可能多行）
+  const education = parseBlock(lines, /教育|学历|校园|学习经历|毕业院校/, (blockLines) => {
+    const l = blockLines.join(' ')
     const years = l.match(/((?:19|20)\d{2}(?:[.\-/年月]\d{1,2})?)\s*[-~—至到]\s*(((?:19|20)\d{2})(?:[.\-/年月]\d{1,2})?|至今|今)/)
+    const schools = l.match(/[\u4e00-\u9fa5]{2,}(?:大学|学院|学校|研究院)/g) || []
     return {
-      school: (l.match(/[\u4e00-\u9fa5]{2,}(?:大学|学院|学校|研究院)/) || [])[0] || '',
+      school: schools[0] || '',
       degree: (l.match(/(博士|硕士|研究生|本科|学士|大专|专科|高中|中专)/) || [])[0] || '',
       major: (l.match(/(?:专业|主修)\s*[:：]?\s*([^\s，,|/]+)/) || [])[1] || '',
       start: (l.match(/((?:19|20)\d{2})/) || [])[1] || '',
@@ -213,41 +276,32 @@ function parseResumeText(text) {
     }
   }).filter((e) => e.school || e.degree || e.major)
 
-  // 技能
+  // 技能（支持"熟悉/精通/掌握 xxx"前缀，支持分隔符与逐行）
   let skills = []
-  pickSection(lines, /技能|专长|技术栈/).forEach((l) => {
-    l.split(/[，,、|;；/]+/).forEach((s) => {
-      s = s.replace(/^[•·\-*\d.\s、]+/, '').trim()
+  const skillLines = pickSection(lines, /技能|专长|技术栈/)
+  if (skillLines.length) {
+    const joined = skillLines.join('\n')
+    // 优先按分隔符拆分
+    const parts = joined.split(/[，,、|;；/\n]+/)
+    parts.forEach((s) => {
+      s = s.replace(/^[•·\-*\d.\s、]+/, '').replace(/^(熟悉|精通|掌握|了解|熟练|擅长)\s*/i, '').trim()
       if (s.length > 1 && s.length < 40) skills.push(s)
     })
-  })
+  }
   if (!skills.length) skills = SKILL_POOL.filter((k) => src.toLowerCase().includes(k.toLowerCase()))
-  skills = [...new Set(skills)].slice(0, 10)
+  skills = [...new Set(skills)].slice(0, 12)
 
   // 荣誉
-  const honors = pickSection(lines, /荣誉|奖项|证书|获奖/).map((l) => l.replace(/^[•·\-*\d.\s、]+/, '').trim()).filter((s) => s.length > 1 && s.length < 60).slice(0, 8)
+  const honors = pickSection(lines, /荣誉|奖项|证书|获奖/).map((l) => l.replace(/^[•·\-*\d.\s、]+/, '').replace(/^(获得|荣获|获)\s*/, '').trim()).filter((s) => s.length > 1 && s.length < 60).slice(0, 8)
 
-  // 个人简介
-  const summary = (pickSection(lines, /自我评价|个人简介|自我介绍|个人总结|关于我/)[0] || '').slice(0, 300)
+  // 个人简介（多行合并）
+  const summary = pickSection(lines, /自我评价|个人简介|自我介绍|个人总结|关于我/).join('\n').slice(0, 600).trim()
 
-  // 工作经历
-  const experience = pickSection(lines, /工作经历|工作经验|实习经历|工作背景/).map((l) => {
-    const years = l.match(/((?:19|20)\d{2}(?:[.\-/年月]\d{1,2})?)\s*[-~—至到]\s*(((?:19|20)\d{2})(?:[.\-/年月]\d{1,2})?|至今|今)/)
-    return {
-      company: (l.match(/([\u4e00-\u9fa5A-Za-z0-9]{2,}(?:公司|集团|科技|网络|银行|医院|学校|研究院|厂|所))/))?.[1] || '',
-      role: (l.match(/(工程师|经理|主管|专员|顾问|设计师|运营|产品|开发|分析师|负责人|总监|架构师|实习生|教师|医生|护士)/))?.[1] || '',
-      start: (l.match(/((?:19|20)\d{2})/) || [])[1] || '',
-      end: years ? (years[2] === '今' ? '至今' : years[2]) : '',
-      city: '',
-      bullets: '',
-    }
-  }).filter((e) => e.company || e.role)
+  // 工作经历（按块：块首行=公司/职位/时间，块内其余行=bullets）
+  const experience = parseExperienceBlock(lines)
 
-  // 项目
-  const projects = pickSection(lines, /项目经历|项目经验/).map((l) => ({
-    name: l.replace(/^[•·\-*\d.\s、]+/, '').slice(0, 50),
-    role: '', tech: '', start: '', end: '', description: '',
-  })).filter((p) => p.name).slice(0, 5)
+  // 项目（按块：块首行=项目名，块内其余行=描述/技术栈）
+  const projects = parseProjectBlock(lines)
 
   return {
     basics: { ...basics, name: basics.name || '未识别姓名' },
@@ -258,6 +312,182 @@ function parseResumeText(text) {
     skills,
     honors,
   }
+}
+
+// 通用"区块 → 块"切分。sectionRe 命中区块标题；isHead 判定某行是否为新块的头。
+function parseBlock(lines, sectionRe, toItem) {
+  const sec = pickSection(lines, sectionRe)
+  if (!sec.length) return []
+  const out = []
+  let cur = null
+  for (const l of sec) {
+    if (isExperienceHead(l)) {
+      if (cur) out.push(toItem(cur))
+      cur = [l]
+    } else if (cur) {
+      cur.push(l)
+    } else {
+      cur = [l]
+    }
+  }
+  if (cur) out.push(toItem(cur))
+  return out
+}
+
+// 工作经历：把区块内文本按"块"切分——块首行=公司/职位/时间，块内其余行收集为工作内容 bullets
+// （不再按"逐行"解析，避免公司/职位/时间被拆散、工作内容丢失）
+function parseExperienceBlock(lines) {
+  const sec = pickSection(lines, /工作经历|工作经验|实习经历|工作背景/)
+  if (!sec.length) return []
+  const blocks = []
+  let cur = null
+  for (const l of sec) {
+    if (isExperienceHead(l)) {
+      if (cur) blocks.push(cur)
+      cur = { head: l, bullets: [] }
+    } else if (cur) {
+      cur.bullets.push(l)
+    } else {
+      // 区块首行不是标准头（极少见）：强制作为第一段头
+      cur = { head: l, bullets: [] }
+    }
+  }
+  if (cur) blocks.push(cur)
+  return blocks.map(buildExperience).filter((e) => e.company || e.role)
+}
+
+function buildExperience(block) {
+  const head = block.head
+  // 日期范围：先整段取走（含"至今/今"），避免日期残留污染公司名
+  const years = head.match(/((?:19|20)\d{2}(?:[.\-/年月]\d{1,2})?)\s*[-~—至到]\s*(((?:19|20)\d{2})(?:[.\-/年月]\d{1,2})?|至今|今)/)
+  const start = years ? years[1].replace(/年/g, '-').replace(/月/g, '') : ''
+  const end = years ? (years[2] === '今' ? '至今' : years[2]) : ''
+  let remain = years ? head.replace(years[0], '') : head
+  remain = remain.replace(/^[\s:：|/·•\-*]+/, '')
+
+  // 公司名：在所有机构后缀候选中取「最早出现」者（并列时取最长后缀），再从后缀往前补全完整机构名
+  let best = null
+  for (const suf of COMPANY_SUFFIX) {
+    const i = remain.indexOf(suf)
+    if (i >= 0 && (!best || i < best.idx || (i === best.idx && suf.length > best.len))) best = { idx: i, len: suf.length }
+  }
+  let company = ''
+  if (best) {
+    const endIdx = best.idx + best.len
+    let s = best.idx
+    while (s > 0 && /[\u4e00-\u9fa5A-Za-z0-9]/.test(remain[s - 1]) && best.idx - s < 20) s--
+    company = remain.slice(s, endIdx)
+  }
+  company = company.replace(/^[\s:：|/·•\-*]+/, '').replace(/[（(].*$/, '').trim()
+  company = company.replace(/^(至今|至|今|到)\s*/, '').trim()
+
+  // 职位：去掉日期与公司名后的剩余部分，再按职位词精修（保留"高级/资深/后端"等修饰）
+  let role = head
+  if (years) role = role.replace(years[0], '')
+  if (company) role = role.replace(company, '')
+  role = role.replace(/^[\s:：|/·•\-*]+/, '').replace(/[-~—至到]/g, ' ').replace(/\s+/g, ' ').trim()
+  const roleHit = role.match(new RegExp(ROLE_WORDS.join('|')))
+  if (roleHit) {
+    const pos = role.indexOf(roleHit[0])
+    role = role.slice(0, pos + roleHit[0].length).replace(/^[\s·•\-*/、，,]+/, '').trim()
+  } else {
+    role = role.replace(/^[\s·•\-*/、，,]+/, '').slice(0, 24)
+  }
+
+  // bullets：块内除首行外的行（可为无符号行），清理前缀；排除误入的块头行
+  const bullets = (block.bullets || [])
+    .map((b) => cleanBullet(b))
+    .filter((b) => b && !isExperienceHead(b))
+    .join('\n')
+
+  return { company, role, start, end, city: '', bullets }
+}
+
+// 项目经历：块首行=项目名(+角色/技术)，块内其余行(•/·/- 等前缀)收集为描述
+function parseProjectBlock(lines) {
+  const sec = pickSection(lines, /项目经历|项目经验/)
+  if (!sec.length) return []
+  const out = []
+  let cur = null
+  for (const l of sec) {
+    const isBullet = /^[•·‣◦▪▫●○◆◇▶➤→\-*\d.)、]/.test(l) || /^[\s]*[•·\-*]\s/.test(l)
+    if (!isBullet && !/^\d{4}\s*[.\-/年月]?\s*\d{0,2}\s*[-~—至到]/.test(l)) {
+      // 项目名/头行
+      if (cur) out.push(buildProject(cur))
+      cur = { head: l, description: [] }
+    } else if (cur) {
+      cur.description.push(cleanBullet(l))
+    } else {
+      cur = { head: l, description: [] }
+    }
+  }
+  if (cur) out.push(buildProject(cur))
+  return out.filter((p) => p.name).slice(0, 6)
+}
+
+const PROJ_ROLE_WORDS = ['项目负责人', '技术负责人', '核心开发', '主要开发', '主导开发', '独立开发', '全栈开发', '前端开发', '后端开发', '算法开发', '负责人', '开发', '设计', '实现', '参与']
+
+function buildProject(cur) {
+  let head = (cur.head || '').replace(/^[•·\-*\d.\s、]+/, '').trim()
+  // 去掉头行中的日期片段
+  head = head.replace(/\s*\d{4}\s*[.\-/年月]?\s*\d{0,2}\s*[-~—至到]\s*[\d.\-年月]*(?:至今)?\s*/g, ' ').trim()
+  let name = head
+  let role = ''
+  let tech = ''
+  const m = head.match(new RegExp(`^(.+?)\\s*(${PROJ_ROLE_WORDS.join('|')})\\s*(.*)$`))
+  if (m && m[1] && m[1].trim()) {
+    name = m[1].trim()
+    role = m[2]
+    tech = (m[3] || '').replace(/^[：:\-|,，、]\s*/, '').trim()
+  }
+  return {
+    name: name.replace(/\s+$/, '').slice(0, 50),
+    role,
+    tech,
+    start: '',
+    end: '',
+    description: cur.description.join('\n'),
+  }
+}
+
+// —— 职位词 / 机构后缀：抽取到模块级共享，避免在各处重复维护 ——
+const ROLE_WORDS = ['首席执行官', 'CTO', 'CFO', 'COO', '总裁', '副总裁', '总经理', '总监', '负责人', '主管', '经理', '工程师', '架构师', '分析师', '设计师', '专员', '顾问', '运营', '产品', '开发', '助理', '管培生', '实习生', '技术专家', '研究员', '教师', '医生', '护士', '行长', '主任']
+const COMPANY_SUFFIX = ['股份有限公司', '集团有限公司', '有限责任公司', '网络科技有限公司', '科技有限公司', '信息技术有限公司', '电子商务有限公司', '教育科技有限公司', '文化传媒有限公司', '智能科技有限公司', '科技发展有限公司', '信息科技有限公司', '咨询服务有限公司', '研究院有限公司', '科技股份有限公司', '有限公司', '集团公司', '科技公司', '网络公司', '信息技术', '电子商务', '教育科技', '文化传媒', '智能科技', '科技发展', '信息科技', '咨询公司', '集团', '公司', '银行', '医院', '大学', '学院', '学校', '研究所', '研究院', '厂', '所']
+
+// 判断一行是否为「工作经历/教育块首行」：
+// 1) 以日期范围开头（2021.03-至今 / 2018.07 ~ 2021.02 …）
+// 2) 含机构后缀，且「后缀前是 2~14 字的机构名、不以动词开头」，且「后缀后紧跟职位词」或「整行很短（独立机构行）」
+// 关键：绝不因行内任意出现"开发/运营/产品"等职位子串就误判（避免把工作内容 bullet 当新经历头）
+function isExperienceHead(l) {
+  if (/^[•·‣◦▪▫●○◆◇▶➤→\-*✓✔]/.test(l)) return false
+  if (/^\d{4}\s*[.\-/年月]?\s*\d{0,2}\s*[-~—至到]/.test(l)) return true
+  const VERB_BEG = /^(担任|负责|参与|主导|协助|推动|支持|承担|独立|完成|开展|对接|进行|从事|实现|牵头|负责了)/
+  for (const suf of COMPANY_SUFFIX) {
+    let i = 0
+    while ((i = l.indexOf(suf, i)) >= 0) {
+      const prefix = l.slice(0, i)
+      const tail = l.slice(i + suf.length)
+      if (VERB_BEG.test(prefix)) { i += suf.length; continue }
+      const pLen = prefix.trim().length
+      if (pLen < 2 || pLen > 14) { i += suf.length; continue }
+      if (!/[\u4e00-\u9fa5A-Za-z0-9]$/.test(prefix.trim())) { i += suf.length; continue }
+      const roleAfter = new RegExp(`(${ROLE_WORDS.join('|')})`).test(tail)
+      const standaloneOrg = tail.trim().length <= 2 && l.length <= 24
+      if (roleAfter || standaloneOrg) return true
+      i += suf.length
+    }
+  }
+  return false
+}
+
+// 清理 bullet 行：去 •/·/-/数字编号/空格 前缀，去尾部分隔符
+function cleanBullet(b) {
+  return b
+    .replace(/^[\s]*[•·‣◦▪▫○●◆◇▶➤→\-*✓✔]\s*/, '')
+    .replace(/^\d+[.)、]\s*/, '')
+    .replace(/^[-–—]\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export async function mockChat({ system, prompt, kind = 'general', json = false } = {}) {
@@ -318,21 +548,25 @@ export async function mockChat({ system, prompt, kind = 'general', json = false 
       const jd = typeof parsed.jd === 'string' ? parsed.jd : ''
       const srcResume = parsed.resume || buildResume(basics)
       const jdInfo = extractJd(jd)
-      const role = jdInfo.role || basics.role || '前端开发工程师'
-      const score = 78
+      const role = jdInfo.role || srcResume?.basics?.title || basics.role || '目标岗位'
+      const srcSkills = (srcResume?.skills || []).map((s) => String(s))
+      const norm = (s) => String(s).toLowerCase().trim()
+      const covered = jdInfo.keywords.filter((k) => srcSkills.some((s) => norm(s).includes(norm(k)) || norm(k).includes(norm(s))))
+      const missing = jdInfo.keywords.filter((k) => !covered.some((c) => norm(c) === norm(k)))
+      const score = Math.min(95, 55 + covered.length * 6)
       const obj = {
         score,
-        matchAnalysis: `你的简历与「${role}」岗位当前匹配度约 ${score}%，已通过可迁移能力映射完成跨行适配改写。`,
-        keywords: jdInfo.keywords.length ? jdInfo.keywords.slice(0, 5) : ['可迁移能力', '跨团队协作', '问题拆解'],
-        missing: jdInfo.keywords.length ? ['目标岗位年限要求', '目标行业项目经验'] : ['目标行业关键词', '岗位所需技能'],
-        highLights: ['多年一线实战经验', '可迁移能力突出', '学习与适应能力强'],
+        matchAnalysis: `你的简历与「${role}」岗位当前匹配度约 ${score}%。已覆盖关键词：${covered.length ? covered.join('、') : '（待补充）'}；建议补充：${missing.slice(0, 4).join('、') || '无明显短板'}。已在完整保留你真实经历的基础上，将各段经历向岗位要求对齐。`,
+        keywords: covered.length ? covered.slice(0, 6) : (jdInfo.keywords.length ? jdInfo.keywords.slice(0, 6) : ['可迁移能力', '跨团队协作', '问题拆解']),
+        missing: missing.length ? missing.slice(0, 6) : ['目标行业项目经验'],
+        highLights: covered.length ? [`已具备 ${covered.slice(0, 3).join('、')} 等岗位相关能力`, '真实项目经历可迁移', '学习适应能力强'] : ['多年一线实战经验', '可迁移能力突出', '学习与适应能力强'],
         suggestions: [
-          `将简历语言统一替换为「${role}」行业的通行术语`,
-          '把原行业成果改写成目标岗位可类比的能力与结果',
-          '在 summary / skills 中显式嵌入 JD 高频关键词',
+          `在 summary / skills 中显式嵌入 JD 高频关键词（如 ${missing.slice(0, 3).join('、') || '岗位核心技能'}）`,
+          '把原行业成果改写成目标岗位可类比的能力与量化结果',
+          '针对岗位要求补充 1-2 段相关的项目 / 经历',
         ],
         adaptedResume: buildAdaptedResume(jd, srcResume),
-        adaptNote: `已将原「${srcResume?.basics?.title || basics.role || '行业'}」经历映射为可迁移能力，重写了个人总结与工作经历，并把技能对齐到「${role}」JD 关键词。`,
+        adaptNote: `公司名 / 职位 / 时间已原样锁定不变；仅将各段工作内容按「${role}」岗位 JD 重写，并保留你真实的量化成果（${covered.join('、') || '无新增关键词'}），未编造虚假数字。`,
       }
       return json ? obj : JSON.stringify(obj)
     }
@@ -540,6 +774,70 @@ export async function mockChat({ system, prompt, kind = 'general', json = false 
         name,
       ].join('\n')
       return json ? { text } : text
+    }
+
+    // Boss 打招呼语（5 风格、Boss ≤50 字硬约束、首字匹配 JD 关键词）
+    case 'greet': {
+      let parsed = {}
+      try { parsed = JSON.parse(prompt) } catch { /* ignore */ }
+      const rb = parsed.resume?.basics || {}
+      const name = rb.name || '我'
+      const yrs = rb.years || (parsed.resume?.experience || []).reduce((s, e) => s + (e.end && e.end !== '至今' ? 0 : 1), 0) || 3
+      const role = parsed.position || rb.title || '目标岗位'
+      const status = parsed.status || '在职' // 在职/离职可立即到岗/校招
+      const statusHint = status.includes('校招') || status.includes('应届') ? '应届' : status.includes('离职') || status.includes('立即') ? '可到岗' : '在职'
+      const jd = parsed.jd || ''
+      const jdInfo = jd ? extractJd(jd) : { role: '', keywords: [] }
+      const kws = (jdInfo.keywords || []).slice(0, 2)
+      const kwText = kws.join('、') || role
+      const highlight = (parsed.highlight || '').trim()
+      // 抓简历里真实存在的量化成果（优先用第一条）
+      const firstExp = (parsed.resume?.experience || [])[0] || {}
+      const firstBullets = String(firstExp.bullets || '').split('\n').map((s) => s.trim()).filter(Boolean)
+      const quantHit = firstBullets.find((b) => /\d/.test(b)) || ''
+      const quant = quantHit ? (quantHit.match(/[\d.%kK万wW倍xX]+[^，。.\s]{0,3}[\u4e00-\u9fa5A-Za-z]*/) || [''])[0].slice(0, 16) : ''
+      // 抓候选人真实技能作为能力佐证
+      const realSkills = (parsed.resume?.skills || []).slice(0, 3)
+
+      // 五个风格：每条独立产物；每条都嵌入 JD 关键词 + 真实量化/技能 + 字数控制
+      const variants = []
+      // 1. 极简有力（Boss 字符限制最严版 ≤45 字）
+      variants.push({
+        style: 'concise',
+        label: '极简有力',
+        hint: '≤45 字，Boss/脉脉快速投递首选',
+        text: `您好！${yrs}年${role}经验，掌握${kwText}，匹配贵司岗位，${statusHint}，期待沟通！`,
+      })
+      // 2. 专业稳重（≤90 字）
+      variants.push({
+        style: 'professional',
+        label: '专业稳重',
+        hint: '90~120 字，国企/外企/正式场合',
+        text: `您好，我是${name}，${yrs}年${role}经验，熟悉${kwText}${realSkills.length ? '等' + realSkills.join('/') : ''}。${highlight || quant ? `近期${highlight || '主导项目「' + (firstExp.company || '') + '」沉淀了' + (quant || '相关方法论')}` : ''}，与贵司「${role}」岗位契合度高，期待进一步沟通！`,
+      })
+      // 3. 真诚亲和（≤120 字）
+      variants.push({
+        style: 'sincere',
+        label: '真诚亲和',
+        hint: '100~140 字，中小企业/文化开放团队',
+        text: `您好！对贵司「${role}」岗位非常感兴趣。本人${yrs}年${role}经历，${quant ? `曾在${firstExp.company || '过往公司'}实现「${quant}」` : `沉淀了${kwText}方向的实战经验`}，我相信自己的实战能为团队带来价值，也愿意持续学习。${statusHint}，期待与您交流！`,
+      })
+      // 4. 技术岗专项（≤130 字，强调技术栈）
+      variants.push({
+        style: 'technical',
+        label: '技术专项',
+        hint: '100~140 字，开发/测试/运维/设计',
+        text: `您好，应聘「${role}」。${yrs}年${role}经验，熟练掌握${kwText}${realSkills.length ? '，熟悉' + realSkills.join('/') : ''}${quant ? `；曾负责「${firstExp.company || '核心项目'}」${quant}相关工作` : ''}，可独立承接模块开发与性能优化。${statusHint}，期待沟通！`,
+      })
+      // 5. 转行/跨行（≤130 字，强调可迁移能力）
+      variants.push({
+        style: 'career-change',
+        label: '转行/跨行',
+        hint: '100~140 字，跨行业转岗场景',
+        text: `您好，意向「${role}」。过往深耕相关领域，长期负责${kwText.replace('、', '与')}方向的落地，沉淀了可迁移能力；${quant ? `曾实现「${quant}」` : '在过往岗位持续交付高质量结果'}。${statusHint}，学习适应速度快，期待深入交流！`,
+      })
+
+      return json ? { variants } : variants.map((v) => v.text).join('\n\n')
     }
 
     // 中英双语互译：返回与输入同结构、翻译后的简历

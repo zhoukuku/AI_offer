@@ -39,7 +39,7 @@ export default function ShareView() {
         </div>
       </div>
       <div className="share-body">
-        <Preview resume={data.resume} template="single" accent="#4f46e5" />
+        <Preview resume={data.resume} template={data.resume.template || 'single'} accent={data.resume.accent || '#4f46e5'} />
       </div>
       <div className="share-foot">由 简历工作台 · AI Resume Studio 生成</div>
     </div>

@@ -25,6 +25,10 @@ const config = {
     //   本地 Ollama: http://localhost:11434/v1
     baseURL: process.env.AI_BASE_URL || 'https://api.deepseek.com/v1',
     model: process.env.AI_MODEL || 'deepseek-chat',
+    // ===== 韧性参数（真实模型模式生效）=====
+    timeoutMs: Number(process.env.AI_TIMEOUT_MS || 45000), // 单次调用超时，超时自动降级
+    retries: Number(process.env.AI_RETRIES || 1), // 可重试错误（网络/5xx/429）的重试次数
+    dailyLimit: Number(process.env.AI_DAILY_LIMIT || 500), // 当日真实模型调用熔断上限（0=不限），超出降级 mock
   },
 
   // ===== 短信验证码 =====

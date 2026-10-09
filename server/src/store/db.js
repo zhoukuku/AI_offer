@@ -46,6 +46,21 @@ class Store {
     this.db.pragma('busy_timeout = 5000') // 锁等待，避免并发写入偶发失败
     this._initSchema()
     this._migrateFromJson()
+    this._healUserIdColumns()
+  }
+
+  // 自检修复：早期版本通过 _save 写入时未填充 userId 列，导致 _byUser 过滤失效。
+  // 从 data 列的 JSON 回填 userId 列，幂等，可重复执行。
+  _healUserIdColumns() {
+    for (const t of ['resumes', 'applications', 'interviews']) {
+      try {
+        this.db.prepare(
+          `UPDATE ${t} SET userId = json_extract(data, '$.userId') WHERE userId IS NULL AND json_extract(data, '$.userId') IS NOT NULL`
+        ).run()
+      } catch (e) {
+        console.error('[heal] 回填 userId 列失败:', t, e?.message)
+      }
+    }
   }
 
   _initSchema() {
@@ -133,9 +148,16 @@ class Store {
     return row ? JSON.parse(row.data) : null
   }
 
+  // 写入实体：users 表无 userId 列；业务表（resumes/applications/interviews）需同步 userId 列，
+  // 以便 _byUser 按列过滤（保证多用户数据隔离与列表/更新/删除正确）。
   _save(table, id, obj, createdAt, updatedAt) {
-    this.db.prepare(`INSERT OR REPLACE INTO ${table} (id, data, createdAt, updatedAt) VALUES (?, ?, ?, ?)`)
-      .run(id, JSON.stringify(obj), createdAt ?? Date.now(), updatedAt ?? Date.now())
+    if (table === 'users') {
+      this.db.prepare(`INSERT OR REPLACE INTO users (id, data, createdAt, updatedAt) VALUES (?, ?, ?, ?)`)
+        .run(id, JSON.stringify(obj), createdAt ?? Date.now(), updatedAt ?? Date.now())
+    } else {
+      this.db.prepare(`INSERT OR REPLACE INTO ${table} (id, userId, data, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)`)
+        .run(id, obj?.userId ?? null, JSON.stringify(obj), createdAt ?? Date.now(), updatedAt ?? Date.now())
+    }
     return obj
   }
 
@@ -324,6 +346,12 @@ class Store {
     if (!rec) return null
     Object.assign(rec, patch, { updatedAt: Date.now() })
     return this._save('interviews', id, rec, rec.createdAt, rec.updatedAt)
+  }
+
+  deleteInterview(id, userId) {
+    const rec = this._byUser('interviews', userId).find((a) => a.id === id)
+    if (!rec) return
+    this.db.prepare('DELETE FROM interviews WHERE id = ?').run(id)
   }
 
   // ===== 加密投递链接（分享给 HR，支持阅读追踪 / 撤销）=====

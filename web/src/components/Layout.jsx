@@ -10,7 +10,8 @@ const BASE_NAV = [
   { to: '/companies', label: '大厂信息源', icon: 'building' },
   { to: '/applications', label: '投递记录', icon: 'inbox' },
   { to: '/interviews', label: '面试复盘', icon: 'calendar' },
-  { to: '/cover', label: '求职信', icon: 'pencil' },
+  { to: '/cover', label: 'Boss 打招呼', icon: 'send' },
+  { to: '/examples', label: '范文库', icon: 'star' },
 ]
 
 export default function Layout() {
@@ -66,29 +67,32 @@ export default function Layout() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <div className="user-chip">
-            <div className={`user-avatar${isAdmin ? ' admin' : ''}`}>{user?.nickname?.[0] || '用'}</div>
-            <div className="user-meta">
-              <div className="user-name">{user?.nickname || '未登录'}</div>
-              <div className="user-phone">{user?.phone === 'admin' ? '管理员' : user?.phone || ''}</div>
-            </div>
-            <button className="user-logout" onClick={doLogout} title="退出登录">
-              <Icon name="logout" size={15} />
-            </button>
-          </div>
-          {!isAdmin && (
-            <div className="plan-chip">
-              <div className="plan-chip-info">
-                <span className={`plan-chip-badge${quota.effective === 'pro' ? ' pro' : ''}`}>{planLabel}</span>
-                {showUpgrade && <span className="plan-chip-sub">剩余 AI {quota.aiRemaining === -1 ? '不限' : quota.aiRemaining} 次</span>}
+          {/* 账户卡：用户 + 配额合并，一卡搞定 */}
+          <div className="account-card">
+            <div className="account-row">
+              <div className={`user-avatar${isAdmin ? ' admin' : ''}`}>{user?.nickname?.[0] || '用'}</div>
+              <div className="user-meta">
+                <div className="user-name">{user?.nickname || '未登录'}</div>
+                <div className="user-phone">{user?.phone === 'admin' ? '管理员' : user?.phone || ''}</div>
               </div>
-              {showUpgrade && (
-                <button className="plan-chip-btn" onClick={() => nav('/upgrade')}>
-                  <Icon name="sparkles" size={13} />升级
-                </button>
-              )}
+              <button className="user-logout" onClick={doLogout} title="退出登录">
+                <Icon name="logout" size={15} />
+              </button>
             </div>
-          )}
+            {!isAdmin && (
+              <div className="plan-row">
+                <div className="plan-info">
+                  <span className={`plan-chip-badge${quota.effective === 'pro' ? ' pro' : ''}`}>{planLabel}</span>
+                  {showUpgrade && <span className="plan-chip-sub">剩余 AI {quota.aiRemaining === -1 ? '不限' : quota.aiRemaining} 次</span>}
+                </div>
+                {showUpgrade && (
+                  <button className="plan-chip-btn" onClick={() => nav('/upgrade')}>
+                    <Icon name="sparkles" size={12} />升级
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <span className={`mode-badge mode-${mode}`}>
             {mode === 'mock' ? '演示模式（未配置 API Key）' : mode === 'live' ? '已接入大模型' : '...'}
           </span>

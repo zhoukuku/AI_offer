@@ -16,7 +16,14 @@ export default function JobMatch() {
   const [error, setError] = useState('')
   const [saveMsg, setSaveMsg] = useState('')
   const [showPreview, setShowPreview] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [greetLoading, setGreetLoading] = useState(false)
+  const [greetVariants, setGreetVariants] = useState([])
+  const [greetCopied, setGreetCopied] = useState('')
+  const [coverLoading, setCoverLoading] = useState(false)
+  const [coverText, setCoverText] = useState('')
   const fileRef = useRef(null)
+  const resumeFileRef = useRef(null)
 
   useEffect(() => {
     api.listResumes().then((list) => { setResumes(list); if (list[0]) load(list[0].id) })
@@ -37,6 +44,22 @@ export default function JobMatch() {
     } catch (err) { setError(err.message) } finally { setOcrLoading(false) }
   }
 
+  // 本页导入旧简历：解析后自动刷新列表并选中，无需跳转到其他页面
+  async function importResume(file) {
+    if (!file) return
+    setImporting(true); setSaveMsg(''); setError('')
+    try {
+      const r = await api.importResume(file)
+      const list = await api.listResumes()
+      setResumes(list)
+      load(r.id)
+      setSaveMsg(`已导入并选中：${r.name || '简历'}`)
+    } catch (err) { setError(err.message) } finally {
+      setImporting(false)
+      if (resumeFileRef.current) resumeFileRef.current.value = ''
+    }
+  }
+
   async function doMatch() {
     if (!jd.trim()) { setError('请先粘贴 JD 或上传岗位截图'); return }
     setMatching(true); setError(''); setResult(null); setSaveMsg(''); setShowPreview(false)
@@ -50,7 +73,7 @@ export default function JobMatch() {
     try {
       setSaveMsg('')
       const created = await api.createResume(`适配 ${result?.adaptedResume?.basics?.title || '岗位'} 版本`)
-      await api.updateResume(created.id, result.adaptedResume)
+      await api.updateResume(created.id, { ...result.adaptedResume, template: resume?.template || 'single', accent: resume?.accent || '#4f46e5' })
       setSaveMsg('已保存为新简历')
       nav(`/resume/${created.id}`)
     } catch (e) { setError(e.message) }
@@ -59,7 +82,7 @@ export default function JobMatch() {
   async function overwrite() {
     try {
       setSaveMsg('')
-      await api.updateResume(current, result.adaptedResume)
+      await api.updateResume(current, { ...result.adaptedResume, template: resume?.template || 'single', accent: resume?.accent || '#4f46e5' })
       setSaveMsg('已覆盖当前简历')
     } catch (e) { setError(e.message) }
   }
@@ -82,9 +105,17 @@ export default function JobMatch() {
         <div className="card card-pad">
           <div className="field">
             <label className="label">选择简历</label>
-            <select className="select" value={current} onChange={(e) => load(e.target.value)}>
-              {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
+            <div className="flex gap-8">
+              <select className="select" value={current} onChange={(e) => load(e.target.value)} style={{ flex: 1 }}>
+                {resumes.length ? resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)
+                  : <option value="">（暂无简历，请先导入）</option>}
+              </select>
+              <button className="btn" onClick={() => resumeFileRef.current?.click()} disabled={importing}>
+                {importing ? '导入中…' : <><Icon name="upload" size={16} />导入旧简历</>}
+              </button>
+              <input ref={resumeFileRef} type="file" accept=".txt,.md,.pdf,.docx" style={{ display: 'none' }} onChange={(e) => importResume(e.target.files?.[0])} />
+            </div>
+            {importing && <div className="muted small" style={{ marginTop: 6 }}>正在解析旧简历并自动填写…</div>}
           </div>
           <div className="field">
             <label className="label">岗位 JD</label>
@@ -175,7 +206,7 @@ export default function JobMatch() {
                   </div>
                   {showPreview && (
                     <div className="match-preview">
-                      <Preview resume={result.adaptedResume} template="single" accent="#4f46e5" />
+                      <Preview resume={result.adaptedResume} template={resume?.template || 'single'} accent={resume?.accent || '#4f46e5'} />
                     </div>
                   )}
                 </div>

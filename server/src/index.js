@@ -8,7 +8,7 @@ import { createRequire } from 'node:module'
 import { extractRawText as mammothExtract } from 'mammoth'
 import config from './config.js'
 import store, { emptyResume } from './store/db.js'
-import { chat, isMock } from './ai/index.js'
+import { chat, isMock, aiStats } from './ai/index.js'
 import companies from './data/companies.js'
 import { signToken, sendCode, verifyCode, requireAuth, requireAdmin, hashPassword, verifyPassword } from './auth.js'
 import { requireAIQuota, requireResumeQuota, planState, aiRemaining, resumeRemaining } from './plan.js'
@@ -28,9 +28,26 @@ app.use(cors())
 app.use(express.json({ limit: '5mb' }))
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } })
 
+// busboy 默认把上传文件名按 latin1 解码，中文文件名会变成 mojibake（å¨æ¶¦é…）。
+// 若 latin1 字节流本身是合法 UTF-8 且转回后含 CJK/假名/谚文 → 判定为被误解码，转回 UTF-8。
+function healName(n) {
+  if (!n || typeof n !== 'string') return n || ''
+  if (!/[\u0080-\u00ff]/.test(n)) return n // 纯 ASCII 名，不受影响
+  try {
+    const s = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(n, 'latin1'))
+    if (s !== n && /[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(s)) return s
+  } catch { /* n 本就是非 mojibake 文本（如真 latin1 文件名），保持原样 */ }
+  return n
+}
+// 上传中间件之后统一纠正 req.file.originalname，覆盖 import / ocr / transcribe 全部入口
+function fixUploadName(req, _res, next) {
+  if (req.file) req.file.originalname = healName(req.file.originalname)
+  next()
+}
+
 // ===== 基础 =====
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mode: isMock ? 'mock' : 'live', time: Date.now() })
+  res.json({ ok: true, mode: isMock ? 'mock' : 'live', time: Date.now(), ai: aiStats() })
 })
 
 // 脱敏后的用户信息
@@ -232,7 +249,7 @@ app.delete('/api/resumes/:id', (req, res) => {
 })
 
 // 旧简历解析导入（智能填写）：上传 PDF/Word/图片，自动提取字段并生成一份新简历
-app.post('/api/resumes/import', requireResumeQuota, upload.single('file'), async (req, res, next) => {
+app.post('/api/resumes/import', requireResumeQuota, upload.single('file'), fixUploadName, async (req, res, next) => {
   try {
     const file = req.file
     if (!file) return res.status(400).json({ error: '未收到文件' })
@@ -331,7 +348,7 @@ app.post('/api/ai/match', async (req, res, next) => {
     const { jd, resume, basics } = req.body || {}
     const prompt = JSON.stringify({ jd, resume, basics })
     const result = await chat({
-      system: '你是一名资深求职转行顾问。用户可能正处于跨行业求职，现有简历与目标岗位 JD 不完全匹配。请完成两件事并输出 JSON：\n1. 匹配度分析：score(0-100)、matchAnalysis、keywords(已覆盖关键词)、missing(建议补充关键词)、highLights(优势)、suggestions(建议)。\n2. 生成适配版简历 adaptedResume（结构同 generate：basics/summary/experience/education/projects/skills/honors）：把原行业经历改写映射为可迁移能力，替换为目标行业术语与 JD 高频关键词，重写 summary 与各段 experience bullets 使其直接对标 JD 要求，弱化无关内容；必须忠实于用户真实经历，不得编造虚假成果。另输出 adaptNote：用两三句话说明为跨行适配做了哪些关键改写。',
+      system: '你是一名资深求职转行顾问。用户可能正处于跨行业求职，现有简历与目标岗位 JD 不完全匹配。请完成两件事并输出 JSON：\n1. 匹配度分析：score(0-100)、matchAnalysis、keywords(已覆盖关键词)、missing(建议补充关键词)、highLights(优势)、suggestions(建议)。\n2. 生成适配版简历 adaptedResume（结构同 generate：basics/summary/experience/education/projects/skills/honors）：把原行业经历改写映射为可迁移能力，替换为目标行业术语与 JD 高频关键词，重写 summary 与各段 experience bullets 使其直接对标 JD 要求，弱化无关内容；必须忠实于用户真实经历，不得编造虚假成果。\n【硬性约束】experience 数组中每一项的 company（公司名）、role（职位）、start / end（起止时间）必须原样保留用户真实信息，绝对不得修改或虚构；只允许重写各段 bullets 的工作内容以对标 JD，且真实量化成果（数字 / 百分比）须原样保留。另输出 adaptNote：用两三句话说明为跨行适配做了哪些关键改写（公司名等保持不变）。',
       prompt,
       kind: 'match',
       json: true,
@@ -445,6 +462,21 @@ app.post('/api/ai/coverletter', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
+// Boss / 脉脉 打招呼语生成（5 风格版本，Boss ≤50 字硬约束）
+app.post('/api/ai/greet', async (req, res, next) => {
+  try {
+    const { resume, jd, position, status, highlight } = req.body || {}
+    const prompt = JSON.stringify({ resume, jd, position, status, highlight })
+    const result = await chat({
+      system: '你是一名求职顾问。请基于用户简历与岗位 JD，生成 5 条不同风格的"打招呼语"，用于 Boss 直聘/脉脉/LinkedIn 等平台的开场白。要求：\n1. 每条都要包含 JD 中出现的高频关键词（让 HR 一眼看到匹配）；\n2. 必须包含真实量化成果（数字）或候选人真实技能，不得编造；\n3. boss 直聘字符限制 ≤50 字（极简版必须遵守），其它场景 ≤140 字；\n4. 禁止"您好，在吗""您好，看看简历"等无意义开场；\n5. 5 个风格：concise（极简 ≤45 字）/ professional（专业稳重 100~120 字）/ sincere（真诚亲和 100~140 字）/ technical（技术专项 100~140 字）/ career-change（转行/跨行 100~140 字）。返回 JSON：{variants: [{style,label,hint,text}]}。',
+      prompt,
+      kind: 'greet',
+      json: true,
+    })
+    res.json(result)
+  } catch (e) { next(e) }
+})
+
 // 面试复盘
 app.post('/api/ai/review', async (req, res, next) => {
   try {
@@ -461,7 +493,7 @@ app.post('/api/ai/review', async (req, res, next) => {
 })
 
 // 岗位截图 OCR（演示模式下返回内置示例 JD 文本；接入真实 OCR 服务后返回真实解析内容）
-app.post('/api/ai/ocr', upload.single('file'), async (req, res) => {
+app.post('/api/ai/ocr', upload.single('file'), fixUploadName, async (req, res) => {
   const file = req.file
   if (!file) return res.status(400).json({ error: '未收到图片' })
   try {
@@ -473,7 +505,7 @@ app.post('/api/ai/ocr', upload.single('file'), async (req, res) => {
 })
 
 // 面试录音转写（演示模式返回示例逐字稿；接入真实 ASR 后返回真实转写）
-app.post('/api/ai/transcribe', upload.single('file'), async (req, res, next) => {
+app.post('/api/ai/transcribe', upload.single('file'), fixUploadName, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: '未收到音频' })
     const text = await transcribeAudio(req.file.buffer, req.file.originalname || '')
@@ -527,6 +559,11 @@ app.put('/api/interviews/:id', (req, res) => {
   res.json(rec)
 })
 
+app.delete('/api/interviews/:id', (req, res) => {
+  store.deleteInterview(req.params.id, req.user.id)
+  res.json({ ok: true })
+})
+
 // ===== 加密投递链接（分享给 HR + 阅读追踪）=====
 // 对外只暴露 token 与查看统计；完整链接由前端用自己 origin 拼接
 function publicShare(s) {
@@ -551,6 +588,8 @@ function publicResume(r) {
     skills: r.skills || [],
     honors: r.honors || [],
     custom: r.custom || [],
+    template: r.template || 'single',
+    accent: r.accent || '#4f46e5',
   }
 }
 
@@ -581,7 +620,9 @@ app.get('/api/share/:token', (req, res) => {
   const r = store.getResume(s.resumeId)
   if (!r) return res.status(404).json({ error: '简历不存在' })
   store.trackShareView(s.token, req.headers['user-agent'] || '')
-  res.json({ resume: publicResume(r), viewCount: s.views.length })
+  // 重新读取以返回追踪后的最新阅读数（避免返回追踪前的值导致的 off-by-one）
+  const after = store.getShareByToken(s.token)
+  res.json({ resume: publicResume(r), viewCount: after ? after.views.length : 1 })
 })
 
 // 未匹配到的 API 路由 → 返回 JSON 404（避免落入前端 SPA 回退）
@@ -628,7 +669,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 // ===== 旧简历解析导入（智能填写）=====
 // 提取文件中的文本，再交给大模型（mock 模式下用启发式规则）解析为结构化字段
 async function parseResumeFile(file) {
-  const filename = file.originalname || 'resume.pdf'
+  const filename = healName(file.originalname || 'resume.pdf')
   const text = await extractTextFromFile(file)
 
   if (text) {
@@ -654,7 +695,7 @@ async function parseResumeFile(file) {
 async function extractTextFromFile(file) {
   const buf = file.buffer || Buffer.alloc(0)
   const ext = (path.extname(file.originalname || '') || '').toLowerCase()
-  const name = file.originalname || ''
+  const name = healName(file.originalname || '')
 
   const printable = (t) => (String(t).match(/[\u4e00-\u9fa5a-zA-Z0-9]/g) || []).length
 
@@ -669,17 +710,40 @@ async function extractTextFromFile(file) {
       const t = String(res?.value || '')
       return printable(t) > 10 ? t : ''
     }
-    if (ext === '.doc') {
-      return '' // 旧版二进制 .doc 无法用现有库解析
-    }
+    // 旧版二进制 .doc：mammoth 无法解析，落到下方按文本编码探测兜底（部分 .doc 实为文本另存，可救回）
+    // 若是真二进制 .doc，解码后 printable 过低会被过滤返回空串
   } catch (e) {
     console.error('[parse] 提取文件文本失败:', name, e?.message)
     return ''
   }
 
-  // 纯文本 / 兜底：按 UTF-8 解码
-  const text = buf.toString('utf-8').replace(/\u0000/g, '')
+  // 纯文本 / 兜底：按编码自动探测解码（UTF-8/BOM/UTF-16/GBK/GB18030），根治中文乱码
+  const text = decodeText(buf)
   return printable(text) > 20 ? text : ''
+}
+
+// 文本解码：自动探测编码并剥离控制字符（BOM/UTF-16/GBK 等），避免 GBK 编码文件导入乱码
+function decodeText(buf) {
+  if (!buf || !buf.length) return ''
+  if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) return stripCtrl(buf.slice(3).toString('utf-8'))
+  if (buf[0] === 0xFF && buf[1] === 0xFE) return stripCtrl(new TextDecoder('utf-16le').decode(buf.slice(2)))
+  if (buf[0] === 0xFE && buf[1] === 0xFF) return stripCtrl(new TextDecoder('utf-16be').decode(buf.slice(2)))
+  try {
+    return stripCtrl(new TextDecoder('utf-8', { fatal: true }).decode(buf))
+  } catch { /* 非 UTF-8 字节流，尝试 GBK/GB18030 */ }
+  try {
+    return stripCtrl(new TextDecoder('gb18030').decode(buf))
+  } catch { /* 兜底 */ }
+  return stripCtrl(buf.toString('utf-8'))
+}
+
+function stripCtrl(t) {
+  return String(t)
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ')
+    .replace(/[\u2028\u2029]/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 // 归一化：确保所有简历字段齐全（缺失回退为空模板结构）

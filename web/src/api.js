@@ -105,6 +105,7 @@ export const api = {
   duplicate: (data) => request('/ai/duplicate', { method: 'POST', body: data }),
   interview: (data) => request('/ai/interview', { method: 'POST', body: data }),
   coverletter: (data) => request('/ai/coverletter', { method: 'POST', body: data }),
+  greet: (data) => request('/ai/greet', { method: 'POST', body: data }),
   ocr: (file) => { const fd = new FormData(); fd.append('file', file); return request('/ai/ocr', { method: 'POST', body: fd }) },
   transcribe: (file) => { const fd = new FormData(); fd.append('file', file); return request('/ai/transcribe', { method: 'POST', body: fd }) },
 
