@@ -4,7 +4,7 @@ import { api, getStoredUser, logout } from '../api.js'
 import Icon from './Icon.jsx'
 
 const BASE_NAV = [
-  { to: '/app', label: '我的简历', icon: 'file', end: true },
+  { to: '/app', label: '工作台', icon: 'file', end: true },
   { to: '/ai', label: 'AI 对话分析', icon: 'chat' },
   { to: '/match', label: '岗位适配', icon: 'target' },
   { to: '/companies', label: '大厂信息源', icon: 'building' },
@@ -62,18 +62,23 @@ export default function Layout() {
           </div>
         </div>
         <nav className="nav">
-          {NAV.map((n) => (
+          {NAV.map((n, index) => (
+            <div key={n.to}>
+            {[0, 3, 6, 9].includes(index) && <div className="nav-group-title">{index === 0 ? '简历与分析' : index === 3 ? '求职进度' : index === 6 ? '求职工具' : '系统管理'}</div>}
             <NavLink
               key={n.to}
+              aria-label={n.label}
+              title={n.label}
               to={n.to}
               end={n.end}
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
             >
               <span className="nav-icon"><Icon name={n.icon} size={16} /></span>
               <span>{n.label}</span>
-            </NavLink>
+            </NavLink></div>
           ))}
         </nav>
+        <button className="mobile-logout icon-btn" aria-label="退出登录" onClick={doLogout}><Icon name="logout" size={18} /></button>
         <div className="sidebar-footer">
           {/* 账户卡：用户 + 配额合并，一卡搞定 */}
           <div className="account-card">
@@ -83,7 +88,7 @@ export default function Layout() {
                 <div className="user-name">{user?.nickname || '未登录'}</div>
                 <div className="user-phone">{user?.phone === 'admin' ? '管理员' : user?.phone || ''}</div>
               </div>
-              <button className="user-logout" onClick={doLogout} title="退出登录">
+              <button className="user-logout" onClick={doLogout} title="退出登录" aria-label="退出登录">
                 <Icon name="logout" size={15} />
               </button>
             </div>
@@ -101,14 +106,14 @@ export default function Layout() {
               </div>
             )}
           </div>
-          <span className={`mode-badge mode-${mode}`}>
+          <span title="本地规则提供内容检查。翻译需要配置大模型，图片和录音需要对应服务。" className={`mode-badge mode-${mode}`}>
             {mode === 'local' ? '本地规则模式' : mode === 'live' ? '已接入大模型' : '...'}
           </span>
         </div>
       </aside>
 
       <main className="content">
-        {mode === 'local' && <div className="service-notice">当前使用本地规则：检查真实内容和关键词，不生成虚构经历。翻译需要接入大模型；截图识别可接 DeepSeek 视觉模型；录音识别需独立转写服务。</div>}
+
         {upgradeNotice && <div className="service-notice">{upgradeNotice} <button className="btn btn-sm" onClick={() => { setUpgradeNotice(''); nav('/upgrade') }}>查看权益</button><button className="btn btn-sm btn-ghost" onClick={() => setUpgradeNotice('')}>关闭</button></div>}
         <Outlet context={{ capabilities }} />
       </main>

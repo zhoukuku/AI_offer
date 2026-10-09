@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getStoredUser } from '../api.js'
 import Icon from '../components/Icon.jsx'
+import { Preview } from '../components/Preview.jsx'
 
 const FINAL_STATUS = ['Offer', '已拒绝']
 const STAGE = { '已投递': 0, '笔试': 1, '面试': 2, 'Offer': 3 }
@@ -32,13 +33,15 @@ export default function Dashboard() {
   const nav = useNavigate()
   const fileRef = useRef(null)
   const [list, setList] = useState(null)
+  const [previews, setPreviews] = useState({})
+  const [visibleCount, setVisibleCount] = useState(6)
   const [apps, setApps] = useState([])
   const [interviews, setInterviews] = useState([])
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
   const [user, setUser] = useState(getStoredUser())
 
-  function load() { api.listResumes().then(setList).catch((e) => setError(e.message)) }
+  function load() { api.listResumes().then(rows => setList([...rows].sort((a,b) => b.updatedAt - a.updatedAt))).catch((e) => setError(e.message)) }
 
   useEffect(() => {
     load()
@@ -46,6 +49,14 @@ export default function Dashboard() {
       .then(([a, i]) => { setApps(a); setInterviews(i) })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    let active = true
+    Promise.allSettled((list || []).slice(0, visibleCount).map(r => api.getResume(r.id))).then(results => {
+      if (active) setPreviews(Object.fromEntries(results.filter(r => r.status === 'fulfilled').map(r => [r.value.id, r.value])))
+    })
+    return () => { active = false }
+  }, [list, visibleCount])
 
   async function create() {
     try {
@@ -140,8 +151,8 @@ export default function Dashboard() {
       <div className="page-header page-header-row">
         <div className="page-header-left">
           <div className="page-header-title">
-            <h1>工作台</h1>
-            <p>欢迎回来，{user?.nickname || '同学'}。今天是 {new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}，继续推进你的求职进度吧。</p>
+            <h1>我的求职工作台</h1>
+            <p>欢迎回来，{user?.nickname || '同学'}。先准备一份好简历，再向心仪的岗位出发。</p>
           </div>
         </div>
         <div className="page-header-actions">
@@ -154,6 +165,80 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <div className="page-header-row section-header-row">
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>我的简历 <span className="muted small" style={{ marginLeft: 8 }}>{list?.length || 0} 份</span></h2>
+        <div className="page-header-actions">
+          <button className="btn btn-sm" onClick={() => fileRef.current?.click()} disabled={importing}>
+            <Icon name="image" size={14} />{importing ? '导入中…' : '导入旧简历'}
+          </button>
+        </div>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"
+        style={{ display: 'none' }}
+        onChange={pickFile}
+      />
+
+      {list === null ? (
+        <div className="loading">加载中…</div>
+      ) : list.length === 0 ? (
+        <div className="empty-state card">
+          <div className="empty-state-art">
+            <svg viewBox="0 0 80 80" width="80" height="80" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="14" y="10" width="44" height="56" rx="6" fill="url(#g1)" />
+              <rect x="22" y="6" width="44" height="56" rx="6" fill="#fff" stroke="url(#g1)" strokeWidth="1.5" />
+              <rect x="30" y="18" width="28" height="3" rx="1.5" fill="#cbd5e1" />
+              <rect x="30" y="26" width="22" height="3" rx="1.5" fill="#e2e8f0" />
+              <rect x="30" y="36" width="28" height="3" rx="1.5" fill="#cbd5e1" />
+              <rect x="30" y="44" width="18" height="3" rx="1.5" fill="#e2e8f0" />
+              <rect x="30" y="54" width="28" height="3" rx="1.5" fill="#cbd5e1" />
+              <circle cx="56" cy="14" r="11" fill="var(--primary)" />
+              <path d="M52 14h8M56 10v8" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+              <defs>
+                <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#6366f1" />
+                  <stop offset="1" stopColor="#8b5cf6" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <div className="empty-state-title">还没有简历，开始你的第一份吧</div>
+          <div className="empty-state-sub">填写真实经历，或导入已有的 PDF、Word、TXT 简历。图片识别需要配置视觉服务。</div>
+          <div className="empty-state-actions">
+            <button className="btn btn-primary" onClick={create}><Icon name="plus" size={15} />创建第一份简历</button>
+            <button className="btn" onClick={() => fileRef.current?.click()} disabled={importing}>
+              <Icon name="image" size={15} />{importing ? '导入中…' : '导入旧简历'}
+            </button>
+            <button className="btn btn-ghost" onClick={() => nav('/examples')}><Icon name="star" size={15} />参考范文</button>
+          </div>
+        </div>
+      ) : (
+        <div className="resume-grid">
+          {list.slice(0, visibleCount).map((r) => (
+            <div key={r.id} className="card resume-card">
+              <button className="resume-thumbnail" aria-label={`编辑简历：${r.name}`} onClick={() => nav(`/resume/${r.id}`)}>
+                {previews[r.id] ? <div className="resume-thumbnail-paper" aria-hidden="true"><Preview resume={previews[r.id]} template={previews[r.id].template} accent={previews[r.id].accent} /></div> : <span className="muted">简历预览</span>}
+              </button>
+              <div className="rc-actions">
+                <button className="btn btn-sm btn-ghost" title="重命名" onClick={(e) => rename(r, e)}><Icon name="pencil" size={13} /></button>
+                <button className="btn btn-sm btn-ghost" title="复制简历" onClick={(e) => duplicate(r, e)}><Icon name="copy" size={13} /></button>
+                <button className="btn btn-sm btn-danger" onClick={(e) => remove(r.id, e)}>删除</button>
+              </div>
+              <div className="rc-name"><button className="resume-title-link" onClick={() => nav(`/resume/${r.id}`)}>{r.name}</button>{r.versionCount > 0 && <span className="badge badge-gray rc-version">{r.versionCount} 个版本</span>}</div>
+              <div className="rc-person">{r.name2 || '未填写姓名'}{r.title ? ` · ${r.title}` : ''}</div>
+              <div className="rc-time">更新于 {formatTime(r.updatedAt)}</div>
+            </div>
+          ))}
+          <button className="card resume-card resume-card-new" onClick={create}>
+            <div className="plus-btn">＋</div>
+            <div>新建简历</div><span className="muted small">为不同岗位准备不同版本</span>
+          </button>
+        </div>
+      )}
+
+      {list && list.length > visibleCount && <button className="btn mb-16" onClick={() => setVisibleCount(n => n + 6)}>查看更多简历（还有 {list.length - visibleCount} 份）</button>}
       <div className="card flow-card">
         <div className="section-title">完成一次有针对性的投递</div>
         <p className="muted small">先填写真实经历，再对照岗位调整内容，核实后导出；记录投递并沉淀面试反馈。</p>
@@ -288,75 +373,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="page-header-row section-header-row">
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>我的简历 <span className="muted small" style={{ marginLeft: 8 }}>{list?.length || 0} 份</span></h2>
-        <div className="page-header-actions">
-          <button className="btn btn-sm" onClick={() => fileRef.current?.click()} disabled={importing}>
-            <Icon name="image" size={14} />{importing ? '导入中…' : '导入旧简历'}
-          </button>
-        </div>
-      </div>
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.webp"
-        style={{ display: 'none' }}
-        onChange={pickFile}
-      />
 
-      {list === null ? (
-        <div className="loading">加载中…</div>
-      ) : list.length === 0 ? (
-        <div className="empty-state card">
-          <div className="empty-state-art">
-            <svg viewBox="0 0 80 80" width="80" height="80" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="14" y="10" width="44" height="56" rx="6" fill="url(#g1)" />
-              <rect x="22" y="6" width="44" height="56" rx="6" fill="#fff" stroke="url(#g1)" strokeWidth="1.5" />
-              <rect x="30" y="18" width="28" height="3" rx="1.5" fill="#cbd5e1" />
-              <rect x="30" y="26" width="22" height="3" rx="1.5" fill="#e2e8f0" />
-              <rect x="30" y="36" width="28" height="3" rx="1.5" fill="#cbd5e1" />
-              <rect x="30" y="44" width="18" height="3" rx="1.5" fill="#e2e8f0" />
-              <rect x="30" y="54" width="28" height="3" rx="1.5" fill="#cbd5e1" />
-              <circle cx="56" cy="14" r="11" fill="var(--primary)" />
-              <path d="M52 14h8M56 10v8" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-              <defs>
-                <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stopColor="#6366f1" />
-                  <stop offset="1" stopColor="#8b5cf6" />
-                </linearGradient>
-              </defs>
-            </svg>
-          </div>
-          <div className="empty-state-title">还没有简历，开始你的第一份吧</div>
-          <div className="empty-state-sub">从零生成 AI 智能填充，或导入你已有的简历（PDF / Word / 图片自动识别）</div>
-          <div className="empty-state-actions">
-            <button className="btn btn-primary" onClick={create}><Icon name="plus" size={15} />从零生成</button>
-            <button className="btn" onClick={() => fileRef.current?.click()} disabled={importing}>
-              <Icon name="image" size={15} />{importing ? '导入中…' : '导入旧简历'}
-            </button>
-            <button className="btn btn-ghost" onClick={() => nav('/examples')}><Icon name="star" size={15} />参考范文</button>
-          </div>
-        </div>
-      ) : (
-        <div className="resume-grid">
-          {list.map((r) => (
-            <div key={r.id} className="card resume-card" onClick={() => nav(`/resume/${r.id}`)}>
-              <div className="rc-actions">
-                <button className="btn btn-sm btn-ghost" title="重命名" onClick={(e) => rename(r, e)}><Icon name="pencil" size={13} /></button>
-                <button className="btn btn-sm btn-ghost" title="复制简历" onClick={(e) => duplicate(r, e)}><Icon name="copy" size={13} /></button>
-                <button className="btn btn-sm btn-danger" onClick={(e) => remove(r.id, e)}>删除</button>
-              </div>
-              <div className="rc-name">{r.name}{r.versionCount > 0 && <span className="badge badge-gray rc-version">{r.versionCount} 个版本</span>}</div>
-              <div className="rc-person">{r.name2 || '未填写姓名'}{r.title ? ` · ${r.title}` : ''}</div>
-              <div className="rc-time">更新于 {formatTime(r.updatedAt)}</div>
-            </div>
-          ))}
-          <div className="card resume-card resume-card-new" onClick={create}>
-            <div className="plus-btn">＋</div>
-            <div>新建简历</div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

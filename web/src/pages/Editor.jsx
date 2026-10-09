@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import Icon from '../components/Icon.jsx'
 import { Preview } from '../components/Preview.jsx'
+import ResumeCanvas from '../components/ResumeCanvas.jsx'
 import { normalizeResume } from '../../../shared/resume.js'
 import { TEMPLATES, getTemplate } from '../templates.js'
 
@@ -329,7 +330,7 @@ export default function Editor() {
       {/* 工具栏：分主区/版本/模板/主题/导出 五段，主操作靠右更醒目 */}
       <div className="editor-toolbar">
         <div className="toolbar-section toolbar-main">
-          <button className="btn btn-primary" onClick={() => setGenOpen(true)}><Icon name="sparkles" size={16} />从零生成</button>
+          <button className="btn btn-primary" onClick={() => setGenOpen(true)}><Icon name="sparkles" size={16} />填写引导</button>
           <button className="btn btn-primary-soft" onClick={doOneClickOptimize} disabled={optOpen}><Icon name="wand" size={16} />一键优化</button>
           <button className="btn" onClick={() => save().catch(() => {})} disabled={saved || saving}><Icon name="check" size={16} />{saving ? '保存中…' : saved ? '已保存' : '保存'}</button>
         </div>
@@ -362,7 +363,10 @@ export default function Editor() {
         <div className="toolbar-section">
           <div className="color-dots">
             {THEMES.map((t) => (
-              <span
+              <button
+                type="button"
+                aria-label={`主题色：${t.label}`}
+                aria-pressed={accent === t.color}
                 key={t.key}
                 className={`color-dot${accent === t.color ? ' active' : ''}`}
                 style={{ background: t.color }}
@@ -382,7 +386,8 @@ export default function Editor() {
 
       <div className="editor-wrap">
         {/* ===== 左侧：结构化表单 ===== */}
-        <div>
+        <div className="editor-form">
+          <div className="editor-outline no-print" aria-label="编辑章节">{["基本信息", "个人总结", "工作经历", "教育经历", "项目经历", "技能", "荣誉奖项"].map(title => <button key={title} onClick={() => document.getElementById(`edit-${title}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{title}</button>)}</div>
           <Section title="基本信息">
             <div className="row-2">
               <Field label="姓名"><input className="input" value={b.name || ''} onChange={(e) => patch((d) => { d.basics.name = e.target.value; return d })} /></Field>
@@ -473,9 +478,7 @@ export default function Editor() {
         </div>
 
         {/* ===== 右侧：预览 ===== */}
-        <div className="print-area">
-          <Preview resume={resume} template={template} accent={accent} />
-        </div>
+        <ResumeCanvas resume={resume} template={template} accent={accent} />
       </div>
 
       {genOpen && (
@@ -627,7 +630,10 @@ export default function Editor() {
               <p className="muted small" style={{ marginTop: 0 }}>以下为你的简历在 9 套模板下的实时效果，点击即可切换（自动保存）。模板差异体现在版式结构上，主题色可在工具栏单独调整。</p>
               <div className="tpl-grid">
                 {TEMPLATES.map((t) => (
-                  <div
+                  <button
+                    type="button"
+                    aria-label={`使用模板：${t.label}`}
+                    aria-pressed={template === t.key}
                     key={t.key}
                     className={`tpl-card${template === t.key ? ' active' : ''}`}
                     onClick={() => {
@@ -645,7 +651,7 @@ export default function Editor() {
                       <b>{t.label}{template === t.key ? ' ✓' : ''}</b>
                       <span>{t.desc}</span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -741,7 +747,7 @@ function gradeText(score) {
 
 function Section({ title, children }) {
   return (
-    <div className="card section-card">
+    <div className="card section-card" id={`edit-${title}`}>
       <div className="section-head"><span className="section-title">{title}</span></div>
       <div className="section-body">{children}</div>
     </div>
@@ -749,7 +755,7 @@ function Section({ title, children }) {
 }
 
 function Field({ label, children }) {
-  return <div className="field"><label className="label">{label}</label>{children}</div>
+  return <label className="field"><span className="label">{label}</span>{children}</label>
 }
 
 export { Preview } from '../components/Preview.jsx'

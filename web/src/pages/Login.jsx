@@ -182,11 +182,11 @@ export default function Login() {
         </form>
 
         {demoLogin && <div className="login-demo muted small">
-          演示管理员账号：admin / admin123
+          本地演示环境 · 请使用已配置的调试账号登录
         </div>}
 
         <div className="login-foot muted small">
-          登录即代表同意服务条款与隐私政策
+          简历与投递记录按账号独立保存
         </div>
       </div>
     </div>

@@ -10,24 +10,24 @@ const FEATURES = [
   { icon: 'search', tone: 'linear-gradient(135deg,#10b981,#0ea5e9)', title: '简历查重 + 原创度评分', desc: '识别模板化套话，输出原创度评分与逐条改写建议，摆脱同质化简历。' },
   { icon: 'image', tone: 'linear-gradient(135deg,#f59e0b,#ef4444)', title: '旧简历智能解析导入', desc: '上传 PDF / Word / 图片旧简历，自动提取字段智能回填，告别手动搬家。' },
   { icon: 'refresh', tone: 'linear-gradient(135deg,#ec4899,#f59e0b)', title: '中英双语一键翻译', desc: '整份简历中英互译，保持原有结构与排版，一键切换求职语言。' },
-  { icon: 'send', tone: 'linear-gradient(135deg,#8b5cf6,#ec4899)', title: '加密投递链接 + 阅读追踪', desc: '生成不可猜测的私密投递链接，HR 打开即留痕，投递进展心中有数。' },
+  { icon: 'send', tone: 'linear-gradient(135deg,#8b5cf6,#ec4899)', title: '私密链接投递链接 + 阅读追踪', desc: '生成不可猜测的私密投递链接，HR 打开即留痕，投递进展心中有数。' },
   { icon: 'inbox', tone: 'linear-gradient(135deg,#06b6d4,#3b82f6)', title: '投递记录 + 面试复盘', desc: '全流程记录投递状态、笔试面试，沉淀每一次复盘，量化求职进展。' },
   { icon: 'copy', tone: 'linear-gradient(135deg,#84cc16,#10b981)', title: '多版本简历管理', desc: '针对不同岗位维护多份差异化简历，投递时一键切换，云端同步不丢失。' },
 ]
 
 // 数据背书（社会证明）
 const STATS = [
-  { v: '50,000+', l: '求职者信任使用' },
-  { v: '1,200,000+', l: '简历被 AI 优化' },
-  { v: '96%', l: '用户反馈更自信' },
-  { v: '32%', l: '平均面试邀约提升' },
+  { v: '9', l: '可切换简历模板' },
+  { v: 'A4', l: '纸张预览与 PDF 导出' },
+  { v: '20 次', l: '免费 AI 调用额度' },
+  { v: '全流程', l: '简历、投递与面试复盘' },
 ]
 
 // 使用流程
 const STEPS = [
   { n: '01', icon: 'file', title: '创建 / 导入简历', desc: '从零生成，或上传旧简历一键智能填写。' },
   { n: '02', icon: 'chat', title: 'AI 优化打磨', desc: '查重、翻译、JD 匹配，多管齐下提升质量。' },
-  { n: '03', icon: 'send', title: '加密投递 + 追踪', desc: '生成私密链接投递，实时掌握 HR 阅读动态。' },
+  { n: '03', icon: 'send', title: '私密链接投递 + 追踪', desc: '生成私密链接投递，实时掌握 HR 阅读动态。' },
 ]
 
 // 定价套餐
@@ -37,14 +37,14 @@ const PLANS = [
     name: '免费版',
     price: '¥0',
     unit: '永久',
-    desc: '注册即可用，送 2 次 AI 免费试用',
+    desc: '注册即可用，送 20 次 AI 免费试用',
     highlight: false,
     cta: '免费注册',
     features: [
       '简历创建与基础编辑',
       '旧简历解析导入',
-      '2 次 AI 免费试用',
-      '1 份简历 · 基础模板',
+      '20 次 AI 免费试用',
+      '3 份简历 · 基础模板',
     ],
   },
   {
@@ -59,7 +59,7 @@ const PLANS = [
       '无限 AI 优化次数',
       '无限份简历与版本',
       '岗位 JD 匹配 + ATS 诊断',
-      '加密投递链接 + 阅读追踪',
+      '私密链接投递链接 + 阅读追踪',
       '投递记录 + 面试复盘',
       '数据分析看板',
     ],
@@ -67,9 +67,9 @@ const PLANS = [
 ]
 
 const FAQS = [
-  { q: '注册需要付费吗？', a: '不需要。使用账号 + 密码即可注册（手机号用于接收验证码），注册后即可免费使用基础功能，并赠送 2 次 AI 免费试用。' },
-  { q: '免费试用次数用完了怎么办？', a: '免费版提供 2 次 AI 免费试用，用完后 AI 高级功能需要开通会员；开通后全部功能无限使用。' },
-  { q: '我的简历数据安全吗？', a: '数据按账号隔离存储，仅你本人可见；投递链接采用随机令牌加密，可随时撤销。' },
+  { q: '注册需要付费吗？', a: '不需要。使用账号 + 密码即可注册（手机号用于接收验证码），注册后即可免费使用基础功能，并赠送 20 次 AI 免费试用。' },
+  { q: '免费试用次数用完了怎么办？', a: '免费版提供 20 次 AI 免费试用，用完后 AI 高级功能需要开通会员；开通后全部功能无限使用。' },
+  { q: '我的简历数据安全吗？', a: '数据按账号隔离存储，仅你本人可见；投递链接采用不可猜测的随机令牌，可随时撤销。' },
   { q: '支持哪些简历格式导入？', a: '支持 PDF、Word（.doc/.docx）、TXT 及常见图片格式，上传后自动解析并回填字段。' },
 ]
 
@@ -118,7 +118,7 @@ export default function Landing() {
             <div className="landing-badge"><Icon name="sparkles" size={14} /> AI 驱动的智能求职工作台</div>
             <h1>让每一份简历<br />都成为 Offer 敲门砖</h1>
             <p className="landing-hero-desc">
-              从零生成、AI 逐句优化、岗位适配、查重翻译，到加密投递与阅读追踪——
+              从零生成、AI 逐句优化、岗位适配、查重翻译，到私密链接投递与阅读追踪——
               一站式 AI 求职工作台，帮你把简历写进 HR 心里。
             </p>
             <div className="landing-hero-actions">
@@ -129,7 +129,7 @@ export default function Landing() {
             </div>
             <div className="landing-hero-points">
               <span><Icon name="check" size={14} /> 账号 + 密码注册</span>
-              <span><Icon name="check" size={14} /> 注册送 2 次 AI 免费试用</span>
+              <span><Icon name="check" size={14} /> 注册送 20 次 AI 免费试用</span>
               <span><Icon name="check" size={14} /> 数据云端同步</span>
             </div>
           </div>
