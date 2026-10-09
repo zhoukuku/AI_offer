@@ -97,6 +97,7 @@ export default function Admin() {
           <button className="btn" onClick={()=>setTab('logs')}>查看操作日志</button>
         </div>
       </div>}
+      {tab==='overview' && stats?.cost && <div className="card card-pad mt-16"><div className="section-title">近 30 天收入与模型成本</div><div className="upgrade-quota-row"><div>真实支付收入<b className="stat-num">¥{stats.cost.revenueCny.toFixed(2)}</b></div><div>模型费用估算<b className="stat-num">¥{stats.cost.estimatedCny.toFixed(4)}</b></div><div>记录的模型请求<b className="stat-num">{stats.cost.calls}</b></div></div><p className="muted small">费用依据服务商返回的 token 用量和配置单价估算，最终以服务商账单为准；无 usage 返回的请求不计入。模拟订单不算营收，未扣除服务器、人工、获客、税费和退款。</p>{stats.cost.byUser.map(row=><div className="admin-summary-line" key={row.userId}><span>账号 {row.account} · {row.calls} 次</span><b>¥{row.estimatedCny.toFixed(4)}</b></div>)}</div>}
       {(tab === 'overview' || tab === 'logs') && <div className="card card-pad mt-16">
         <div className="flex-between"><div className="section-title">{tab==='overview'?'近期操作':'操作与简历日志'}</div><span className="muted small">共 {logs?.total ?? 0} 条</span></div>
         <div className="admin-log-filters">

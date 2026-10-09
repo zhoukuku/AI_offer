@@ -20,6 +20,10 @@ const config = {
 
   ai: {
     // 留空则使用 mock 模式
+    inputPrice: Number(process.env.AI_INPUT_PRICE_USD || .3),
+    outputPrice: Number(process.env.AI_OUTPUT_PRICE_USD || 1.2),
+    cachePrice: Number(process.env.AI_CACHE_PRICE_USD || .006),
+    usdCny: Number(process.env.AI_USD_CNY || 7.2),
     apiKey: process.env.AI_API_KEY || '',
     // OpenAI 兼容 baseURL：
     //   DeepSeek:  https://api.deepseek.com/v1

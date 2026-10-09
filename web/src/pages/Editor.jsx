@@ -4,6 +4,7 @@ import { api, getStoredUser } from '../api.js'
 import Icon from '../components/Icon.jsx'
 import { Preview } from '../components/Preview.jsx'
 import ResumeCanvas from '../components/ResumeCanvas.jsx'
+import ChangeReview from '../components/ChangeReview.jsx'
 import { normalizeResume } from '../../../shared/resume.js'
 import { TEMPLATES, getTemplate } from '../templates.js'
 
@@ -49,6 +50,8 @@ export default function Editor() {
   const [saving, setSaving] = useState(false)
   const photoInput = useRef(null)
   const [photoLoading, setPhotoLoading] = useState(false)
+  const [change, setChange] = useState(null)
+  const [undo, setUndo] = useState(null)
   const latest = useRef(null)
   const dirty = useRef(false)
   const writes = useRef(Promise.resolve())
@@ -169,15 +172,39 @@ export default function Editor() {
     } catch (e) { setError(e.message) } finally { setGenLoading(false) }
   }
 
+  function targetValue(r,t) {
+    if (t.type==='experience') return r.experience?.[t.index]?.bullets || ''
+    if (t.type==='projects') return r.projects?.[t.index]?.description || ''
+    return r.summary || ''
+  }
+  function writeTarget(d,t,text) {
+    if (t.type==='experience' && d.experience?.[t.index]) d.experience[t.index].bullets=text
+    else if (t.type==='projects' && d.projects?.[t.index]) d.projects[t.index].description=text
+    else d.summary=text
+    return d
+  }
+  function applyChange() {
+    if (!change) return
+    const current=targetValue(latest.current,change.target)
+    if (current!==change.before) {setError('原文已变化，请重新润色以免覆盖新修改');setChange(null);return}
+    setUndo({target:change.target,before:change.before,after:change.after})
+    patch(d=>writeTarget(d,change.target,change.after))
+    setChange(null)
+  }
+  function undoChange() {
+    if (!undo) return
+    if (targetValue(latest.current,undo.target)!==undo.after && !window.confirm('这段内容后来又有修改。撤销将恢复 AI 应用前的原文，是否继续？')) return
+    patch(d=>writeTarget(d,undo.target,undo.before));setUndo(null)
+  }
   async function genExperience(idx) {
-    setGenExpIdx(idx)
-    setError('')
+    const exp=resume.experience[idx]
+    if (!exp.bullets?.trim()) {setError('请先填写实际做过的工作，再使用 AI 润色');return}
+    setGenExpIdx(idx);setError('')
     try {
-      const exp = resume.experience[idx]
-      const r = await api.experience({ company: exp.company, role: exp.role, industry: resume.basics?.title || '互联网', highlight: exp.bullets || '' })
-      const bullets = Array.isArray(r.bullets) ? r.bullets.join('\n') : r.bullets || exp.bullets
-      patch((d) => { d.experience[idx].bullets = bullets; return d })
-    } catch (e) { setError(e.message) } finally { setGenExpIdx(-1) }
+      const r=await api.experience({company:exp.company,role:exp.role,industry:resume.basics?.title||'',highlight:exp.bullets})
+      const after=Array.isArray(r.bullets)?r.bullets.join('\n'):r.bullets||exp.bullets
+      setChange({title:'工作经历润色对比',before:exp.bullets,after,target:{type:'experience',index:idx}})
+    } catch(e){setError(e.message)}finally{setGenExpIdx(-1)}
   }
 
   async function doScore() {
@@ -195,15 +222,9 @@ export default function Editor() {
     try {
       const r = await api.optimize({ resume, target: item.target })
       const text = typeof r === 'string' ? r : r.text || ''
-      patch((d) => {
-        const t = item.target || {}
-        if (t.type === 'experience' && d.experience?.[t.index]) d.experience[t.index].bullets = text
-        else if (t.type === 'projects' && d.projects?.[t.index]) d.projects[t.index].description = text
-        else d.summary = text
-        return d
-      })
-      // 应用后从改进清单中移除该项
-      setScoreData((s) => s ? { ...s, improvements: s.improvements.filter((x) => x.id !== item.id) } : s)
+      const target=item.target || {type:'summary'}
+      setChange({title:'优化建议对比',before:targetValue(resume,target),after:text,target})
+      setScoreOpen(false)
     } catch (e) { setError(e.message) } finally { setApplyingId('') }
   }
 
@@ -323,7 +344,7 @@ export default function Editor() {
           </div>
         </div>
         <div className="page-header-actions">
-          <button className="btn" onClick={doScore} disabled={scoreLoading}><Icon name="activity" size={15} />{scoreLoading ? '体检中…' : 'AI 体检'}</button>
+          <button className="btn" onClick={doScore} disabled={scoreLoading}><Icon name="activity" size={15} />{scoreLoading ? '体检中…' : 'AI 体检（1 次）'}</button>
           <button className="btn" onClick={doDuplicate} disabled={dupLoading}><Icon name="search" size={15} />{dupLoading ? '查重中…' : '查重'}</button>
           <button className="btn" onClick={doTranslate} disabled={transLoading}><Icon name="refresh" size={15} />{transLoading ? '翻译中…' : '中英互译'}</button>
           <button className="btn" onClick={openShare} disabled={shareLoading}><Icon name="send" size={15} />{shareLoading ? '生成中…' : '分享投递'}</button>
@@ -336,7 +357,8 @@ export default function Editor() {
       <div className="editor-toolbar">
         <div className="toolbar-section toolbar-main">
           <button className="btn btn-primary" onClick={() => setGenOpen(true)}><Icon name="sparkles" size={16} />填写引导</button>
-          <button className="btn btn-primary-soft" onClick={doOneClickOptimize} disabled={optOpen}><Icon name="wand" size={16} />一键优化</button>
+          <button className="btn btn-primary-soft" onClick={doOneClickOptimize} disabled={optOpen}><Icon name="wand" size={16} />一键优化（至少 3 次）</button>
+          {undo && <button className="btn" onClick={undoChange}>撤销上次 AI 修改</button>}
           <button className="btn" onClick={() => save().catch(() => {})} disabled={saved || saving}><Icon name="check" size={16} />{saving ? '保存中…' : saved ? '已保存' : '保存'}</button>
         </div>
 
@@ -481,12 +503,13 @@ export default function Editor() {
         <ResumeCanvas resume={resume} template={template} accent={accent} />
       </div>
 
+      {change && <ChangeReview {...change} onApply={applyChange} onClose={()=>setChange(null)} />}
       {genOpen && (
         <div className="modal-mask" onClick={() => setGenOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head"><span><Icon name="sparkles" size={16} />从零生成简历</span><button className="icon-btn" aria-label="关闭" onClick={() => setGenOpen(false)}><Icon name="x" size={18} /></button></div>
             <div className="modal-body">
-              <p className="muted small">填写基础信息，AI 将为你生成一份结构完整、量化表达的简历（正文内容可稍后修改）。</p>
+              <p className="muted small">填写基础信息，AI 将建立简历框架；请补充真实经历，不要使用未发生的成果。</p>
               <div className="row-2">
                 <Field label="姓名"><input className="input" value={genForm.name} onChange={(e) => setGenForm({ ...genForm, name: e.target.value })} placeholder="张三" /></Field>
                 <Field label="目标岗位"><input className="input" value={genForm.role} onChange={(e) => setGenForm({ ...genForm, role: e.target.value })} placeholder="前端开发工程师" /></Field>

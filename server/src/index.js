@@ -9,6 +9,8 @@ import { extractRawText as mammothExtract } from 'mammoth'
 import config from './config.js'
 import { normalizeResume as normalizeContent } from '../../shared/resume.js'
 import store, { emptyResume } from './store/db.js'
+import { mockChat } from './ai/providers/mock.js'
+import { aiContext } from './ai/usage.js'
 import { chat, isMock, aiStats } from './ai/index.js'
 import companies from './data/companies.js'
 import { signToken, sendCode, verifyCode, requireAuth, requireAdmin, hashPassword, verifyPassword } from './auth.js'
@@ -218,27 +220,28 @@ app.get('/api/pay/plans', (_req, res) => {
 
 // 开通会员：默认走模拟支付（直接写入会员状态）；配置 PAYMENT_PROVIDER 后接真实支付。
 // 真实支付链路建议：本接口创建订单并返回支付跳转 URL，支付成功 Webhook 回调中再调用 store.grantPlan。
-app.post('/api/pay/checkout', requireAuth, async (req, res) => {
-  const planKey = String(req.body?.plan || '').trim()
-  const plan = config.subscription.plans[planKey]
-  if (!plan) return res.status(400).json({ error: '无效的套餐' })
-  if (!config.demo && isMockPayment()) return res.status(503).json({ error: '支付服务尚未配置，暂不可开通会员' })
+app.get('/api/pay/orders', requireAuth, (req,res)=>res.json(store.listOrders(req.user.id)))
+app.get('/api/pay/orders/:id', requireAuth, (req,res)=>{
+  const order=store.getOrder(req.params.id,req.user.id)
+  if (!order) return res.status(404).json({error:'订单不存在'})
+  res.json(order)
+})
+app.post('/api/pay/checkout', requireAuth, async (req,res)=>{
+  const planKey=String(req.body?.plan||'').trim(),plan=config.subscription.plans[planKey]
+  if (!plan) return res.status(400).json({error:'无效的套餐'})
+  if (!config.demo && isMockPayment()) return res.status(503).json({error:'支付服务尚未配置，暂不可开通会员'})
+  const order=store.createOrder(req.user.id,planKey,plan,config.payment.provider)
   try {
-    const order = await getPayment().checkout({ planKey, plan, days: plan.days, userId: req.user.id })
-    if (order.url) {
-      // 真实支付：前端跳转到收银台；后端在支付成功回调里开通会员
-      return res.json({ ok: true, mock: isMockPayment(), order, payUrl: order.url })
-    }
-    // mock / 直接开通：写入会员状态
-    const u = store.grantPlan(req.user.id, { planKey, days: plan.days })
-    res.json({ ok: true, mock: isMockPayment(), order, user: publicUser(u) })
-  } catch (e) {
-    res.status(502).json({ error: '支付失败：' + e.message })
-  }
+    const result=await getPayment().checkout({orderId:order.id,planKey,plan,days:plan.days,userId:req.user.id})
+    if (result.url) return res.json({ok:true,mock:isMockPayment(),order,payUrl:result.url})
+    if (!isMockPayment()) throw new Error('支付服务未返回收银台地址')
+    const user=store.settleOrder(order.id,{amount:plan.price,providerOrderId:result.orderId})
+    res.json({ok:true,mock:true,order:store.getOrder(order.id,req.user.id),user:publicUser(user)})
+  } catch(e) {store.failOrder(order.id);res.status(502).json({error:'支付创建失败，会员未开通'})}
 })
 
 // ===== 管理员接口 =====
-app.get('/api/admin/stats', requireAuth, requireAdmin, (_req, res) => res.json({...store.stats(),...store.operationsSummary()}))
+app.get('/api/admin/stats', requireAuth, requireAdmin, (_req, res) => res.json({...store.stats(),...store.operationsSummary(),cost:store.costSummary()}))
 
 app.get('/api/admin/logs', requireAuth, requireAdmin, (req, res) => {
   const page = Math.max(1, Math.min(100000, Number.parseInt(req.query.page,10)||1))
@@ -263,7 +266,7 @@ app.put('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
 })
 
 // ===== 登录用户业务数据隔离：以下业务接口统一要求登录 =====
-app.use(['/api/resumes', '/api/applications', '/api/interviews', '/api/ai'], requireAuth)
+app.use(['/api/resumes', '/api/applications', '/api/interviews', '/api/ai'], requireAuth, (req,res,next)=>aiContext.run({userId:req.user.id,task:req.path.split('/').pop()},next))
 // AI 能力统一消耗配额（免费档受限）；付费 / 试用 / 管理员不受限
 app.use('/api/ai', (req, res, next) => {
   const clean = value => Array.isArray(value) ? value.map(clean) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => !['avatar', 'versions'].includes(key)).map(([key, v]) => [key, clean(v)])) : value
@@ -300,12 +303,13 @@ app.delete('/api/resumes/:id', (req, res) => {
 })
 
 // 旧简历解析导入（智能填写）：上传 PDF/Word/图片，自动提取字段并生成一份新简历
-app.post('/api/resumes/import', requireResumeQuota, (req, res, next) => isMock ? next() : requireAIQuota(req, res, next), upload.single('file'), fixUploadName, async (req, res, next) => {
+app.post('/api/resumes/import', requireResumeQuota, upload.single('file'), fixUploadName, (req,res,next)=> !isMock && (/\.(png|jpe?g|webp)$/i.test(req.file?.originalname||'') || req.query.ai==='true') ? requireAIQuota(req,res,next) : next(), async (req, res, next) => {
   try {
     const file = req.file
     if (!file) return res.status(400).json({ error: '未收到文件' })
     if (!/\.(txt|md|pdf|docx|png|jpe?g|webp)$/i.test(file.originalname || '')) return res.status(400).json({ error: '请上传 TXT、MD、PDF、DOCX 或图片简历' })
-    const parsed = await parseResumeFile(file)
+    if (req.query.ai!=='true' && !/\.(png|jpe?g|webp)$/i.test(file.originalname)) res.set('X-AI-Mode','local')
+    const parsed = await parseResumeFile(file, req.query.ai==='true')
     const fileStem = (file.originalname || '导入简历').replace(/\.[^.]+$/, '')
     const parsedName = parsed?.basics?.name && parsed.basics.name !== '示例用户' ? parsed.basics.name : ''
     const name = parsedName ? `${parsedName} · ${fileStem}` : fileStem
@@ -735,11 +739,12 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 
 // ===== 旧简历解析导入（智能填写）=====
 // 提取文件中的文本，再交给大模型（mock 模式下用启发式规则）解析为结构化字段
-async function parseResumeFile(file) {
+async function parseResumeFile(file, useAI = false) {
   const filename = healName(file.originalname || 'resume.pdf')
   const text = await extractTextFromFile(file)
 
   if (text) {
+    if (!useAI) return mockChat({kind:'parse-resume',prompt:JSON.stringify({filename,text}),json:true})
     return await chat({
       system: '你是一名简历解析专家，请将用户上传的旧简历文本解析为结构化 JSON，字段：basics(姓名/意向/电话/邮箱/城市/网站)、summary、experience(公司/职位/起止/城市/bullets)、education(学校/学历/专业/起止)、projects(名称/角色/技术栈/起止/描述)、skills(字符串数组)、honors(字符串数组)。忠实还原原文，缺失字段留空。',
       prompt: JSON.stringify({ filename, text }),

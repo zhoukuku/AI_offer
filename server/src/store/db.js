@@ -55,6 +55,16 @@ class Store {
       status INTEGER NOT NULL, duration INTEGER NOT NULL, createdAt INTEGER NOT NULL
     ); CREATE INDEX IF NOT EXISTS operations_time ON operation_logs(createdAt);
     CREATE INDEX IF NOT EXISTS operations_user ON operation_logs(userId, category);`)
+    this.db.exec(`CREATE TABLE IF NOT EXISTS model_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, userId TEXT NOT NULL, task TEXT NOT NULL,
+      model TEXT NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cached INTEGER NOT NULL,
+      estimatedCny REAL NOT NULL, createdAt INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS model_usage_time ON model_usage(createdAt);
+    CREATE TABLE IF NOT EXISTS orders (
+      id TEXT PRIMARY KEY, userId TEXT NOT NULL, planKey TEXT NOT NULL, amount INTEGER NOT NULL,
+      days INTEGER NOT NULL, provider TEXT NOT NULL, status TEXT NOT NULL,
+      createdAt INTEGER NOT NULL, paidAt INTEGER, providerOrderId TEXT
+    ); CREATE INDEX IF NOT EXISTS orders_user ON orders(userId,createdAt);`)
     this._initSchema()
     this._migrateFromJson()
     this._healUserIdColumns()
@@ -239,6 +249,39 @@ class Store {
 
   countUsers() {
     return this.db.prepare('SELECT COUNT(*) AS c FROM users').get().c
+  }
+
+  recordModelUsage({userId,task,model,input,output,cached}) {
+    const estimatedCny = ((input-cached)*config.ai.inputPrice + cached*config.ai.cachePrice + output*config.ai.outputPrice)/1e6*config.ai.usdCny
+    this.db.prepare('INSERT INTO model_usage (userId,task,model,input,output,cached,estimatedCny,createdAt) VALUES (?,?,?,?,?,?,?,?)').run(userId,task,model,input,output,cached,estimatedCny,Date.now())
+  }
+  costSummary() {
+    const since = Date.now()-30*86400000
+    const usage = this.db.prepare('SELECT count(*) AS calls,coalesce(sum(input),0) AS input,coalesce(sum(output),0) AS output,coalesce(sum(estimatedCny),0) AS estimatedCny FROM model_usage WHERE createdAt>=?').get(since)
+    const byUser = this.db.prepare('SELECT userId,count(*) AS calls,sum(estimatedCny) AS estimatedCny FROM model_usage WHERE createdAt>=? GROUP BY userId ORDER BY estimatedCny DESC LIMIT 10').all(since).map(r=>({...r,account:this.findUserById(r.userId)?.account || '系统'}))
+    const revenue = this.db.prepare("SELECT coalesce(sum(amount),0) AS cents,count(*) AS paidOrders FROM orders WHERE status='paid' AND provider!='mock' AND paidAt>=?").get(since)
+    return {...usage,byUser,revenueCny:revenue.cents/100,paidOrders:revenue.paidOrders,since}
+  }
+  createOrder(userId,planKey,plan,provider) {
+    const id = 'ord_'+crypto.randomBytes(12).toString('hex')
+    this.db.prepare('INSERT INTO orders VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,userId,planKey,plan.price,plan.days,provider,'pending',Date.now(),null,null)
+    return this.getOrder(id,userId)
+  }
+  getOrder(id,userId) { return this.db.prepare('SELECT * FROM orders WHERE id=? AND userId=?').get(id,userId) || null }
+  listOrders(userId) { return this.db.prepare('SELECT * FROM orders WHERE userId=? ORDER BY createdAt DESC LIMIT 100').all(userId) }
+  failOrder(id) { this.db.prepare("UPDATE orders SET status='failed' WHERE id=? AND status='pending'").run(id) }
+  // Called only after a trusted provider verifies payment. Idempotent settlement and entitlement update.
+  settleOrder(id,{amount,providerOrderId}) {
+    return this.db.transaction(()=>{
+      const order=this.db.prepare('SELECT * FROM orders WHERE id=?').get(id)
+      if (!order || order.amount!==amount) throw new Error('订单不存在或金额不一致')
+      if (order.status==='paid') return this.findUserById(order.userId)
+      if (order.status!=='pending') throw new Error('订单状态不可支付')
+      const user=this.grantPlan(order.userId,{planKey:order.planKey,days:order.days})
+      if (!user) throw new Error('用户不存在')
+      this.db.prepare("UPDATE orders SET status='paid',paidAt=?,providerOrderId=? WHERE id=?").run(Date.now(),providerOrderId||'',id)
+      return user
+    })()
   }
 
   logOperation({ userId, account, category, action, resourceId = '', status, duration }) {

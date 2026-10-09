@@ -50,3 +50,9 @@ video.mp4
 outputs/
 test-results/
 playwright-report/
+
+# Deployment secrets
+.env.*
+!.env.example
+!.env.production.example
+backups/

@@ -76,6 +76,7 @@ export const api = {
   updateMe: (data) => request('/auth/me', { method: 'PUT', body: data }),
 
   // 会员 / 订阅
+  payOrders: () => request('/pay/orders'),
   payPlans: () => request('/pay/plans'),
   checkout: (plan) => request('/pay/checkout', { method: 'POST', body: { plan } }),
 

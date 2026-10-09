@@ -1,4 +1,5 @@
 import config from '../config.js'
+import { recordUsage } from '../ai/usage.js'
 
 export async function ocrFile(buffer, filename = '') {
   if (config.ocr.provider !== 'openai' || !config.ocr.apiKey) {
@@ -14,6 +15,7 @@ export async function ocrFile(buffer, filename = '') {
   })
   if (!response.ok) throw Object.assign(new Error(`识别服务请求失败 (${response.status})`), {status:502})
   const data = await response.json(), text = data.choices?.[0]?.message?.content
+  recordUsage(data?.usage, config.ocr.model)
   if (typeof text !== 'string' || !text.trim()) throw Object.assign(new Error('图片中未识别到可用文字'),{status:422})
   return text.trim()
 }

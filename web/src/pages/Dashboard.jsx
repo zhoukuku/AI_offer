@@ -205,7 +205,7 @@ export default function Dashboard() {
             </svg>
           </div>
           <div className="empty-state-title">还没有简历，开始你的第一份吧</div>
-          <div className="empty-state-sub">填写真实经历，或导入已有的 PDF、Word、TXT 简历。图片识别需要配置视觉服务。</div>
+          <div className="empty-state-sub">第一步：导入已有简历或填写真实经历。第二步：选择目标岗位。第三步：核实修改并导出。</div>
           <div className="empty-state-actions">
             <button className="btn btn-primary" onClick={create}><Icon name="plus" size={15} />创建第一份简历</button>
             <button className="btn" onClick={() => fileRef.current?.click()} disabled={importing}>
@@ -239,6 +239,7 @@ export default function Dashboard() {
       )}
 
       {list && list.length > visibleCount && <button className="btn mb-16" onClick={() => setVisibleCount(n => n + 6)}>查看更多简历（还有 {list.length - visibleCount} 份）</button>}
+      <div className="muted small mb-16">基础编辑、文字型 PDF / Word / TXT 导入和 PDF 导出免费；图片识别及 AI 建议按成功请求计次。</div>
       <div className="card flow-card">
         <div className="section-title">完成一次有针对性的投递</div>
         <p className="muted small">先填写真实经历，再对照岗位调整内容，核实后导出；记录投递并沉淀面试反馈。</p>

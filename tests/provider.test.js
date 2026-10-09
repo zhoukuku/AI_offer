@@ -16,7 +16,7 @@ test('真实服务代码：JSON 合约、上下文、错误退款、图片识别
   let content='针对历史对话的回答'
   if(Array.isArray(body.messages[0]?.content)) content='截图岗位：React 工程师'
   else if(body.response_format) content=JSON.stringify(broken ? {overall:90} : {overall:80,summary:'服务返回',dimensions:[{key:'completeness',name:'完整度',score:80,tip:'检查内容'}],strengths:[],atsKeywords:[],improvements:[]})
-  res.end(JSON.stringify({choices:[{message:{content},finish_reason:'stop'}],usage:{total_tokens:123}}))
+  res.end(JSON.stringify({choices:[{message:{content},finish_reason:'stop'}],usage:{prompt_tokens:100,completion_tokens:23,prompt_cache_hit_tokens:40,total_tokens:123}}))
  }).listen(0,'127.0.0.1');await once(fake,'listening');const base='http://127.0.0.1:'+fake.address().port
  const server=await startServer({AI_API_KEY:'fake-test-only',AI_BASE_URL:base,AI_MODEL:'deepseek-flash',AI_RETRIES:'0',OCR_PROVIDER:'openai',OCR_BASE_URL:base,OCR_API_KEY:'fake-ocr-key',ASR_PROVIDER:'whisper',ASR_ENDPOINT:base+'/transcribe',ASR_API_KEY:'fake-asr-key'})
  try {
@@ -31,6 +31,13 @@ test('真实服务代码：JSON 合约、上下文、错误退款、图片识别
   const image=new FormData();image.append('file',new Blob([Buffer.from([137,80,78,71,13,10,26,10,1,2,3])],{type:'image/png'}),'image.png')
   const ocr=await server.request('/ai/ocr',{token,body:image});assert.equal(ocr.status,200);assert.equal(ocr.data.text,'截图岗位：React 工程师');assert.match(JSON.parse(requests.at(-1).raw).messages[0].content[1].image_url.url,/^data:image\/png;base64,/)
   const audio=new FormData();audio.append('file',new Blob(['test audio'],{type:'audio/webm'}),'record.webm')
+  const admin=await server.request('/auth/login',{body:{account:'test_admin',password:'admin-password'}})
+  const stats=await server.request('/admin/stats',{token:admin.data.token})
+  assert.equal(stats.data.cost.calls,4)
+  assert.equal(stats.data.cost.input,400)
+  assert.equal(stats.data.cost.output,92)
+  assert.ok(stats.data.cost.estimatedCny>0)
+  assert.equal(stats.data.cost.byUser[0].userId,user.user.id)
   const asr=await server.request('/ai/transcribe',{token,body:audio});assert.equal(asr.status,200);assert.equal(asr.data.text,'测试录音的真实服务返回');assert.match(requests.at(-1).headers['content-type'],/multipart\/form-data/);assert.match(requests.at(-1).raw,/record.webm/)
  }finally {await server.stop();await new Promise(resolve=>fake.close(resolve))}
 })

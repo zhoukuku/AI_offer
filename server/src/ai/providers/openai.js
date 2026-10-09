@@ -1,4 +1,5 @@
 import config from '../../config.js'
+import { recordUsage } from '../usage.js'
 
 // 使用 Node 18+ 内置 fetch 调用 OpenAI 兼容接口（DeepSeek / 豆包 / GLM / OpenAI / Ollama 通用）
 // 支持：超时控制（AbortController）、maxTokens 成本护栏、usage 用量回传（meta.usage）
@@ -49,6 +50,7 @@ export async function openaiChat({ system, prompt, json = false, model, maxToken
   }
 
   const data = await res.json()
+  recordUsage(data?.usage, model)
   // 用量回传：供成本统计（prompt/completion/total tokens）
   if (meta && data?.usage) meta.usage = data.usage
 
