@@ -73,7 +73,7 @@ export default function Login() {
         : await api.login(account.trim(), password)
       setToken(r.token)
       setStoredUser(r.user)
-      nav(redirect, { replace: true })
+      nav(r.user?.role === 'admin' && redirect === '/app' ? '/admin' : redirect, { replace: true })
     } catch (err) {
       setError(err.message)
     } finally {

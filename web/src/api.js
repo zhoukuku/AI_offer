@@ -80,6 +80,7 @@ export const api = {
   checkout: (plan) => request('/pay/checkout', { method: 'POST', body: { plan } }),
 
   // 管理员
+  adminLogs: (filters = {}) => request('/admin/logs?' + new URLSearchParams(filters)),
   adminStats: () => request('/admin/stats'),
   adminUsers: () => request('/admin/users'),
   adminUpdateUser: (id, patch) => request(`/admin/users/${id}`, { method: 'PUT', body: patch }),

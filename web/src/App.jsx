@@ -33,7 +33,7 @@ function RequireAdmin({ children }) {
 
 // 已登录访问公开页（落地页/登录页）时直接进工作台
 function PublicOnly({ children }) {
-  if (getToken()) return <Navigate to="/app" replace />
+  if (getToken()) return <Navigate to={getStoredUser()?.role === 'admin' ? '/admin' : '/app'} replace />
   return children
 }
 

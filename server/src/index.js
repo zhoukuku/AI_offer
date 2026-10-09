@@ -28,6 +28,27 @@ const app = express()
 app.use(cors({ exposedHeaders: ['X-AI-Mode'] }))
 if (!config.demo && !config.auth.secret) throw new Error('生产模式必须设置 AUTH_SECRET')
 app.use(express.json({ limit: '5mb' }))
+// Audit only operation metadata. Never persist request bodies, resume text, passwords or tokens.
+app.use('/api', (req, res, next) => {
+  const started = Date.now()
+  const sendJson = res.json.bind(res)
+  res.json = data => { if (typeof data?.id === 'string') res.locals.auditResourceId = data.id; return sendJson(data) }
+  res.once('finish', () => {
+    if (req.method === 'GET' || req.method === 'OPTIONS') return
+    const route = req.route?.path || ''
+    let actor = req.user
+    if (route === '/api/auth/login' && res.statusCode < 400) actor = store.findUserByAccount(String(req.body?.account || ''))
+    if (route === '/api/auth/register' && res.statusCode < 400) actor = store.findUserByAccount(String(req.body?.account || ''))
+    if (!actor) return
+    const category = route.includes('/ai/') ? 'ai' : route.includes('/resumes') ? 'resume' : route.includes('/applications') ? 'application' : route.includes('/interviews') ? 'interview' : route.includes('/pay/') ? 'payment' : route.includes('/admin/') ? 'admin' : 'auth'
+    const verb = req.method === 'DELETE' ? '删除' : req.method === 'PUT' ? '更新' : '创建'
+    const names = {resume:'简历',application:'投递记录',interview:'面试复盘',admin:'用户权限',auth:'账户'}
+    const action = category === 'ai' ? 'AI · '+route.split('/').pop() : route.endsWith('/login') ? '登录' : route.endsWith('/register') ? '注册' : category === 'payment' ? (config.demo ? '模拟开通会员' : '创建支付订单') : verb+(names[category] || category)
+    try { store.logOperation({userId:actor.id,account:actor.account||actor.nickname||actor.id,category,action,resourceId:req.params?.id||res.locals.auditResourceId||'',status:res.statusCode,duration:Date.now()-started}) }
+    catch (e) { console.error('[audit] 操作日志写入失败') }
+  })
+  next()
+})
 const authAttempts = new Map()
 app.use('/api/auth', (req, res, next) => {
   if (req.method !== 'POST') return next()
@@ -217,7 +238,13 @@ app.post('/api/pay/checkout', requireAuth, async (req, res) => {
 })
 
 // ===== 管理员接口 =====
-app.get('/api/admin/stats', requireAuth, requireAdmin, (_req, res) => res.json(store.stats()))
+app.get('/api/admin/stats', requireAuth, requireAdmin, (_req, res) => res.json({...store.stats(),...store.operationsSummary()}))
+
+app.get('/api/admin/logs', requireAuth, requireAdmin, (req, res) => {
+  const page = Math.max(1, Math.min(100000, Number.parseInt(req.query.page,10)||1))
+  const category = ['ai','resume','auth','admin','application','interview','payment'].includes(req.query.category) ? req.query.category : ''
+  res.json(store.operationLogs({userId:String(req.query.userId||''),category,page}))
+})
 
 app.get('/api/admin/users', requireAuth, requireAdmin, (_req, res) => {
   res.json(store.listUsers().map(publicUser))

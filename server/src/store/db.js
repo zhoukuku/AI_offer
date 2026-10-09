@@ -49,6 +49,12 @@ class Store {
       id TEXT PRIMARY KEY, userId TEXT NOT NULL, periodStart INTEGER NOT NULL,
       createdAt INTEGER NOT NULL, free INTEGER NOT NULL
     ); CREATE INDEX IF NOT EXISTS ai_quota_user_time ON ai_quota_requests(userId, createdAt);`)
+    this.db.exec(`CREATE TABLE IF NOT EXISTS operation_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, userId TEXT NOT NULL, account TEXT NOT NULL,
+      category TEXT NOT NULL, action TEXT NOT NULL, resourceId TEXT NOT NULL,
+      status INTEGER NOT NULL, duration INTEGER NOT NULL, createdAt INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS operations_time ON operation_logs(createdAt);
+    CREATE INDEX IF NOT EXISTS operations_user ON operation_logs(userId, category);`)
     this._initSchema()
     this._migrateFromJson()
     this._healUserIdColumns()
@@ -233,6 +239,35 @@ class Store {
 
   countUsers() {
     return this.db.prepare('SELECT COUNT(*) AS c FROM users').get().c
+  }
+
+  logOperation({ userId, account, category, action, resourceId = '', status, duration }) {
+    this.db.prepare('INSERT INTO operation_logs (userId,account,category,action,resourceId,status,duration,createdAt) VALUES (?,?,?,?,?,?,?,?)').run(userId,account,category,action,resourceId,status,duration,Date.now())
+  }
+
+  operationLogs({ userId = '', category = '', page = 1 } = {}) {
+    const where = 'WHERE (? = \'\' OR userId = ?) AND (? = \'\' OR category = ?)'
+    const params = [userId,userId,category,category]
+    const total = this.db.prepare('SELECT count(*) AS n FROM operation_logs '+where).get(...params).n
+    const rows = this.db.prepare('SELECT * FROM operation_logs '+where+' ORDER BY id DESC LIMIT 25 OFFSET ?').all(...params,(page-1)*25)
+    return { rows, total, page, pageSize:25 }
+  }
+
+  operationsSummary() {
+    const now = Date.now(), day = 86400000
+    const today = Math.floor((now + 8*3600000)/day)*day-8*3600000
+    const since = today-6*day
+    const trend = this.db.prepare("SELECT date(createdAt/1000,'unixepoch','+8 hours') AS date, count(*) AS operations, sum(category='ai' AND status<400) AS ai FROM operation_logs WHERE createdAt>=? GROUP BY date").all(since)
+    const users = this.listUsers().filter(u=>u.role!=='admin')
+    return {
+      customers:users.length,
+      members:users.filter(u=>u.plan==='pro'&&(!u.planExpiresAt||u.planExpiresAt>now)).length,
+      todayActive:this.db.prepare('SELECT count(DISTINCT userId) AS n FROM operation_logs WHERE createdAt>=?').get(today).n,
+      todayAI:this.db.prepare("SELECT count(*) AS n FROM operation_logs WHERE createdAt>=? AND category='ai' AND status<400").get(today).n,
+      todayFailures:this.db.prepare('SELECT count(*) AS n FROM operation_logs WHERE createdAt>=? AND status>=400').get(today).n,
+      trend:Array.from({length:7},(_,i)=>{const date=new Date(since+i*day+8*3600000).toISOString().slice(0,10);return trend.find(r=>r.date===date)||{date,operations:0,ai:0}}),
+      loggingSince:this.db.prepare('SELECT min(createdAt) AS t FROM operation_logs').get().t || null,
+    }
   }
 
   // 全局统计（管理员看板）

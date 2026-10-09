@@ -45,7 +45,7 @@ export default function Layout() {
     nav('/login', { replace: true })
   }
 
-  const NAV = user?.role === 'admin' ? [...BASE_NAV, { to: '/admin', label: '管理后台', icon: 'shield' }] : BASE_NAV
+  const NAV = user?.role === 'admin' ? [{to:'/admin',label:'运营 Dashboard',icon:'layout'}, {to:'/app',label:'用户端测试',icon:'file',end:true}] : BASE_NAV
   const isAdmin = user?.role === 'admin'
   const quota = user?.quota || {}
   const planLabel = quota.proActive ? '会员' : '免费版'
@@ -57,14 +57,14 @@ export default function Layout() {
         <div className="brand">
           <div className="brand-logo">简</div>
           <div>
-            <div className="brand-name">简历工作台</div>
+            <div className="brand-name">{isAdmin ? 'AI Offer · 管理中心' : '简历工作台'}</div>
             <div className="brand-sub">AI Resume Studio</div>
           </div>
         </div>
         <nav className="nav">
           {NAV.map((n, index) => (
             <div key={n.to}>
-            {[0, 3, 6, 9].includes(index) && <div className="nav-group-title">{index === 0 ? '简历与分析' : index === 3 ? '求职进度' : index === 6 ? '求职工具' : '系统管理'}</div>}
+            {[0, 3, 6, 9].includes(index) && <div className="nav-group-title">{index === 0 ? (user?.role === 'admin' ? '平台管理' : '简历与分析') : index === 3 ? '求职进度' : index === 6 ? '求职工具' : '系统管理'}</div>}
             <NavLink
               key={n.to}
               aria-label={n.label}

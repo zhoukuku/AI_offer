@@ -1290,3 +1290,13 @@ body { background-image: none; }
 .pv-head-photo-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .preview.tpl-classic .pv-avatar { margin: 0 auto 12px; }
 fieldset.editor-form { border: 0; margin: 0; padding: 0 5px 0 0; min-inline-size: 0; }
+.admin-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
+.admin-overview { grid-template-columns: 1.5fr 1fr; }
+.admin-bars { display: flex; gap: 16px; height: 190px; padding-top: 12px; }
+.admin-bar-day { flex: 1; display: flex; flex-direction: column; align-items: center; font-size: 12px; }
+.admin-bar-track { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3px; margin: 8px 0; }
+.admin-bar-track > div { width: 22px; background: #5262df; border-radius: 4px 4px 0 0; }
+.admin-bar-track > .admin-bar-ai { background: #a5b4fc; }
+.admin-summary-line { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 14px 0; }
+.admin-log-filters { display: flex; gap: 10px; align-items: center; margin: 16px 0; flex-wrap: wrap; }
+.admin-log-filters .select { max-width: 220px; }
