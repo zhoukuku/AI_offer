@@ -420,7 +420,7 @@ export default function Editor() {
                   <textarea className="textarea" rows={4} value={exp.bullets || ''} onChange={(e) => patch((d) => { d.experience[i].bullets = e.target.value; return d })} placeholder={'负责……（动作 + 结果 + 量化指标）'} />
                 </Field>
                 <button className="btn btn-sm btn-soft" onClick={() => genExperience(i)} disabled={genExpIdx === i}>
-                  {genExpIdx === i ? '生成中…' : <><Icon name="sparkles" size={14} />AI 生成经历</>}
+                  {genExpIdx === i ? '润色中…' : <><Icon name="sparkles" size={14} />AI 润色</>}
                 </button>
               </div>
             ))}
