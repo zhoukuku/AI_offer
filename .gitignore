@@ -45,3 +45,8 @@ yarn-error.log*
 
 # ===== 演示视频（体积大，不入库；如需展示可用 Git LFS 或外链）=====
 video.mp4
+
+# Local verification artifacts
+outputs/
+test-results/
+playwright-report/

@@ -35,11 +35,13 @@
   }
 
   function filledEl(el, b, rule) {
+    if (el.disabled || el.readOnly || ['hidden','password','file','checkbox','radio','submit','button'].includes(el.type) || !el.getClientRects().length) return false
     const haystack = [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), nearestLabelText(el)]
       .filter(Boolean).join(' ').toLowerCase()
     const matched = rule.find((r) => r.keys.some((k) => haystack.includes(k.toLowerCase())))
     if (!matched || matched.value == null || matched.value === '') return false
 
+    if (el.value) return false
     const tag = el.tagName.toLowerCase()
     if (tag === 'select') {
       const opt = [...el.options].find((o) => o.text.toLowerCase().includes(String(matched.value).toLowerCase()))
@@ -47,7 +49,9 @@
       return false
     }
     if (el.value) return false // 不覆盖已有内容
-    el.value = matched.value
+    const setter = Object.getOwnPropertyDescriptor(tag === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')?.set
+    if (setter) setter.call(el, String(matched.value))
+    else el.value = matched.value
     dispatch(el)
     return true
   }
@@ -55,7 +59,7 @@
   function nearestLabelText(el) {
     const id = el.id
     if (!id) return ''
-    const label = document.querySelector(`label[for="${id}"]`)
+    const label = document.querySelector(`label[for="${CSS.escape(id)}"]`)
     return label ? label.textContent : ''
   }
 
@@ -67,6 +71,6 @@
   function expText(resume) {
     const e = resume.experience?.[0]
     if (!e) return ''
-    return `${e.company} · ${e.role}\n${(e.bullets || []).slice(0, 2).join('\n')}`
+    return `${e.company} · ${e.role}\n${(Array.isArray(e.bullets) ? e.bullets : String(e.bullets || '').split('\n')).slice(0, 2).join('\n')}`
   }
 })()

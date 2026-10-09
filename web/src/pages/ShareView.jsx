@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../api.js'
-import { Preview } from './Editor.jsx'
+import { Preview } from '../components/Preview.jsx'
 
 // 公开分享页：HR 无需登录即可查看简历（每次打开后台上报一次阅读）
 export default function ShareView() {

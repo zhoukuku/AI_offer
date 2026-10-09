@@ -10,25 +10,33 @@ const BASE_NAV = [
   { to: '/companies', label: '大厂信息源', icon: 'building' },
   { to: '/applications', label: '投递记录', icon: 'inbox' },
   { to: '/interviews', label: '面试复盘', icon: 'calendar' },
-  { to: '/cover', label: 'Boss 打招呼', icon: 'send' },
+  { to: '/greet', label: 'Boss 打招呼', icon: 'send' },
+  { to: '/cover', label: '求职信', icon: 'pencil' },
   { to: '/examples', label: '范文库', icon: 'star' },
 ]
 
 export default function Layout() {
   const nav = useNavigate()
   const [mode, setMode] = useState('')
+  const [upgradeNotice, setUpgradeNotice] = useState('')
+  const [capabilities, setCapabilities] = useState({})
   const [user, setUser] = useState(getStoredUser())
 
   useEffect(() => {
-    api.health().then((h) => setMode(h.mode)).catch(() => setMode('unknown'))
+    api.health().then((h) => { setMode(h.mode); setCapabilities(h.capabilities || {}) }).catch(() => setMode('unknown'))
 
+    api.me().catch(() => {})
+    const onUser = () => setUser(getStoredUser())
+    const onUpgrade = e => setUpgradeNotice(e.detail)
+    window.addEventListener('rw-user-updated', onUser)
+    window.addEventListener('rw-upgrade-required', onUpgrade)
     // 登录态失效时跳回登录页
     const onUnauthorized = () => {
       setUser(null)
       nav('/login', { replace: true })
     }
     window.addEventListener('rw-unauthorized', onUnauthorized)
-    return () => window.removeEventListener('rw-unauthorized', onUnauthorized)
+    return () => { window.removeEventListener('rw-unauthorized', onUnauthorized); window.removeEventListener('rw-user-updated', onUser); window.removeEventListener('rw-upgrade-required', onUpgrade) }
   }, [nav])
 
   function doLogout() {
@@ -94,13 +102,15 @@ export default function Layout() {
             )}
           </div>
           <span className={`mode-badge mode-${mode}`}>
-            {mode === 'mock' ? '演示模式（未配置 API Key）' : mode === 'live' ? '已接入大模型' : '...'}
+            {mode === 'local' ? '本地规则模式' : mode === 'live' ? '已接入大模型' : '...'}
           </span>
         </div>
       </aside>
 
       <main className="content">
-        <Outlet />
+        {mode === 'local' && <div className="service-notice">当前使用本地规则：检查真实内容和关键词，不生成虚构经历。翻译需要接入大模型；截图识别可接 DeepSeek 视觉模型；录音识别需独立转写服务。</div>}
+        {upgradeNotice && <div className="service-notice">{upgradeNotice} <button className="btn btn-sm" onClick={() => { setUpgradeNotice(''); nav('/upgrade') }}>查看权益</button><button className="btn btn-sm btn-ghost" onClick={() => setUpgradeNotice('')}>关闭</button></div>}
+        <Outlet context={{ capabilities }} />
       </main>
     </div>
   )

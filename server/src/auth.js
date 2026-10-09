@@ -44,7 +44,7 @@ export function verifyToken(token) {
   const payload = decoded.slice(0, idx)
   const sig = decoded.slice(idx + 1)
   const expect = crypto.createHmac('sha256', SECRET).update(payload).digest('hex')
-  if (sig !== expect) return null
+  if (!/^[a-f0-9]{64}$/.test(sig) || !crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expect, 'hex'))) return null
   const [userId, exp] = payload.split('.')
   if (!userId || !exp || Number(exp) < Date.now()) return null
   return userId

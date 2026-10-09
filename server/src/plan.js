@@ -38,8 +38,17 @@ export function requireAIQuota(req, res, next) {
     if (aiRemaining(req.user) <= 0) {
       return res.status(402).json({ error: '免费 AI 试用次数已用完，请开通会员', code: 'UPGRADE_REQUIRED', upgrade: true })
     }
-    // 注：updateUser 会就地修改内存对象（req.user 同引用），无需再手动累加
-    store.updateUser(req.user.id, { aiUsed: (req.user.aiUsed || 0) + 1 })
+    if (!store.reserveAI(req.user.id, config.subscription.free.aiQuota)) {
+      return res.status(402).json({ error: '免费 AI 次数已用完，请开通会员', code: 'UPGRADE_REQUIRED', upgrade: true })
+    }
+    let settled = false
+    const settle = () => {
+      if (settled) return
+      settled = true
+      if (!res.writableFinished || res.statusCode >= 400) store.refundAI(req.user.id)
+    }
+    res.once('finish', settle)
+    res.once('close', settle)
   }
   next()
 }
@@ -48,7 +57,7 @@ export function requireAIQuota(req, res, next) {
 export function requireResumeQuota(req, res, next) {
   const s = planState(req.user)
   if (s.effective === 'free' && resumeRemaining(req.user) <= 0) {
-    return res.status(402).json({ error: '免费版仅支持保留 1 份简历，请升级会员', code: 'UPGRADE_REQUIRED', upgrade: true })
+    return res.status(402).json({ error: '免费版简历名额已用完，请升级会员', code: 'UPGRADE_REQUIRED', upgrade: true })
   }
   next()
 }

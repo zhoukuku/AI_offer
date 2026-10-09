@@ -1,51 +1,19 @@
-// 服务后台：处理「打开工作台」「记录投递」等动作
-// 后端 / 工作台地址可配置：在 popup 中设置后存入 chrome.storage.local，默认本地开发地址。
 const DEFAULT_API = 'http://localhost:8787'
 const DEFAULT_WORKSPACE = 'http://localhost:5173'
-
-function getSettings() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(
-      { apiUrl: DEFAULT_API, workspaceUrl: DEFAULT_WORKSPACE },
-      (s) => resolve(s)
-    )
-  })
-}
-
+const settings = () => chrome.storage.local.get({apiUrl:DEFAULT_API,workspaceUrl:DEFAULT_WORKSPACE,token:''})
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type === 'OPEN_WORKSPACE') {
-    getSettings().then((s) => {
-      chrome.tabs.create({ url: s.workspaceUrl })
-      sendResponse({ ok: true })
-    })
-    return true // 保持异步通道
-  } else if (msg.type === 'SAVE_APPLICATION') {
-    saveApplication(msg.data)
-      .then((r) => sendResponse({ ok: true, data: r }))
-      .catch((e) => sendResponse({ ok: false, error: e.message }))
-    return true
-  }
+  if (!['OPEN_WORKSPACE','SAVE_APPLICATION'].includes(msg.type)) return
+  ;(async () => {
+    const s = await settings()
+    if (msg.type === 'OPEN_WORKSPACE') { await chrome.tabs.create({url:s.workspaceUrl + '/interviews'}); return {ok:true} }
+    if (!s.token) throw new Error('请先在插件中登录工作台账号')
+    const [tab] = await chrome.tabs.query({active:true,currentWindow:true})
+    if (!tab?.url || !/^https?:/.test(tab.url)) throw new Error('请在岗位网页上记录投递')
+    const {resumeId} = await chrome.storage.local.get('resumeId')
+    const response = await fetch(s.apiUrl + '/api/applications',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.token},body:JSON.stringify({company:msg.data?.company || new URL(tab.url).hostname,position:msg.data?.position || tab.title,url:tab.url,resumeId:resumeId || null,status:'已投递',source:'官网'})})
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || '记录失败')
+    return {ok:true,data}
+  })().then(sendResponse).catch(e => sendResponse({ok:false,error:e.message}))
+  return true
 })
-
-async function saveApplication({ company, position, url }) {
-  const { apiUrl } = await getSettings()
-  const tab = await getCurrentTab()
-  const res = await fetch(`${apiUrl}/api/applications`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      company: company || new URL(tab.url).hostname,
-      position: position || tab.title,
-      url: url || tab.url,
-      status: '已投递',
-    }),
-  })
-  if (!res.ok) throw new Error('记录投递失败')
-  return res.json()
-}
-
-function getCurrentTab() {
-  return new Promise((resolve) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs[0]))
-  })
-}

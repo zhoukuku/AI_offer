@@ -2,13 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import Icon from '../components/Icon.jsx'
-import { Preview } from './Editor.jsx'
+import { Preview } from '../components/Preview.jsx'
+import { normalizeResume } from '../../../shared/resume.js'
 
 export default function JobMatch() {
   const nav = useNavigate()
   const [resumes, setResumes] = useState([])
   const [current, setCurrent] = useState('')
   const [resume, setResume] = useState(null)
+  const [company, setCompany] = useState('')
+  const [position, setPosition] = useState('')
+  const [url, setUrl] = useState('')
+  const [saving, setSaving] = useState(false)
   const [jd, setJd] = useState('')
   const [matching, setMatching] = useState(false)
   const [ocrLoading, setOcrLoading] = useState(false)
@@ -26,12 +31,13 @@ export default function JobMatch() {
   const resumeFileRef = useRef(null)
 
   useEffect(() => {
-    api.listResumes().then((list) => { setResumes(list); if (list[0]) load(list[0].id) })
+    api.listResumes().then((list) => { setResumes(list); if (list[0]) load(list[0].id) }).catch(e => setError(e.message))
   }, [])
 
   function load(id) {
     setCurrent(id)
-    api.getResume(id).then(setResume)
+    setResult(null); setResume(null); setSaveMsg(''); setShowPreview(false)
+    api.getResume(id).then(r => { setResume(r); setPosition(r.basics?.title || '') }).catch(e => setError(e.message))
   }
 
   async function handleFile(e) {
@@ -61,6 +67,7 @@ export default function JobMatch() {
   }
 
   async function doMatch() {
+    if (!resume) { setError('请先选择或导入简历'); return }
     if (!jd.trim()) { setError('请先粘贴 JD 或上传岗位截图'); return }
     setMatching(true); setError(''); setResult(null); setSaveMsg(''); setShowPreview(false)
     try {
@@ -70,21 +77,30 @@ export default function JobMatch() {
   }
 
   async function saveAsNew() {
+    setSaving(true); setError('')
     try {
-      setSaveMsg('')
-      const created = await api.createResume(`适配 ${result?.adaptedResume?.basics?.title || '岗位'} 版本`)
-      await api.updateResume(created.id, { ...result.adaptedResume, template: resume?.template || 'single', accent: resume?.accent || '#4f46e5' })
-      setSaveMsg('已保存为新简历')
+      const created = await api.createResume(`适配 ${position || '岗位'} 版本`, { ...normalizeResume(result.adaptedResume), template: resume?.template || 'single', accent: resume?.accent || '#4f46e5' })
       nav(`/resume/${created.id}`)
-    } catch (e) { setError(e.message) }
+    } catch (e) { setError(e.message) } finally { setSaving(false) }
   }
 
   async function overwrite() {
+    if (!window.confirm('将保留原简历快照并应用适配稿，请先核实内容。是否继续？')) return
+    setSaving(true); setError('')
     try {
-      setSaveMsg('')
-      await api.updateResume(current, { ...result.adaptedResume, template: resume?.template || 'single', accent: resume?.accent || '#4f46e5' })
-      setSaveMsg('已覆盖当前简历')
-    } catch (e) { setError(e.message) }
+      const before = {id:'v' + Date.now(),name:'岗位适配前备份',createdAt:Date.now(),content:normalizeResume(resume)}
+      const after = await api.updateResume(current, { ...normalizeResume(result.adaptedResume), versions:[...(resume.versions || []),before] })
+      setResume(after); setSaveMsg('已应用适配稿，原文已保存到版本快照')
+    } catch (e) { setError(e.message) } finally { setSaving(false) }
+  }
+
+  async function recordApplication() {
+    if (!company.trim() || !position.trim()) { setError('请填写目标公司和岗位后记录投递'); return }
+    setSaving(true); setError('')
+    try {
+      await api.addApplication({company,position,url,resumeId:current,jd,source:'其他',status:'已投递'})
+      nav('/applications')
+    } catch (e) { setError(e.message) } finally { setSaving(false) }
   }
 
   const matched = result?.keywords || []
@@ -117,6 +133,11 @@ export default function JobMatch() {
             </div>
             {importing && <div className="muted small" style={{ marginTop: 6 }}>正在解析旧简历并自动填写…</div>}
           </div>
+          <div className="grid two-col">
+            <div className="field"><label className="label">目标公司</label><input className="input" value={company} onChange={e => setCompany(e.target.value)} placeholder="记录投递时填写" /></div>
+            <div className="field"><label className="label">目标岗位</label><input className="input" value={position} onChange={e => setPosition(e.target.value)} /></div>
+          </div>
+          <div className="field"><label className="label">岗位链接（可选）</label><input className="input" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…" /></div>
           <div className="field">
             <label className="label">岗位 JD</label>
             <textarea className="textarea" rows={10} value={jd} onChange={(e) => setJd(e.target.value)} placeholder="粘贴招聘岗位描述（职责 / 要求）…" />
@@ -126,7 +147,7 @@ export default function JobMatch() {
               {ocrLoading ? '识别中…' : <><Icon name="image" size={16} />上传岗位截图识别</>}
             </button>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
-            <button className="btn btn-primary" onClick={doMatch} disabled={matching}>
+            <button className="btn btn-primary" onClick={doMatch} disabled={matching || !resume}>
               {matching ? '适配中…' : <><Icon name="target" size={16} />开始适配</>}
             </button>
           </div>
@@ -198,8 +219,9 @@ export default function JobMatch() {
                     <div className="adapt-note"><Icon name="sparkles" size={14} />{result.adaptNote}</div>
                   )}
                   <div className="flex gap-8 wrap">
-                    <button className="btn btn-primary" onClick={saveAsNew}>保存为新简历</button>
-                    <button className="btn" onClick={overwrite}>覆盖当前简历</button>
+                    <button className="btn btn-primary" onClick={saveAsNew} disabled={saving}>保存为新简历</button>
+                    <button className="btn" onClick={overwrite} disabled={saving}>应用并备份原文</button>
+                    <button className="btn" onClick={recordApplication} disabled={saving}>已投递，记录进度</button>
                     <button className="btn btn-ghost" onClick={() => setShowPreview((v) => !v)}>
                       <Icon name="file" size={15} />{showPreview ? '收起预览' : '预览适配版简历'}
                     </button>

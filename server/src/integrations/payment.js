@@ -32,7 +32,9 @@ const impls = {
 }
 
 export function getPayment() {
-  return impls[config.payment.provider] || impls.mock
+  const provider = impls[config.payment.provider]
+  if (!provider) throw new Error('该支付服务商尚未接入，不能模拟开通')
+  return provider
 }
 
 export function isMockPayment() {

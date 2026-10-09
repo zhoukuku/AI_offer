@@ -21,6 +21,7 @@ export function getStoredUser() {
 
 export function setStoredUser(u) {
   u ? localStorage.setItem(USER_KEY, JSON.stringify(u)) : localStorage.removeItem(USER_KEY)
+  window.dispatchEvent(new Event('rw-user-updated'))
 }
 
 export function logout() {
@@ -53,10 +54,15 @@ async function request(path, opts = {}) {
     err.status = res.status
     err.code = e.code
     // 402 表示付费墙拦截：需要升级会员
-    if (res.status === 402 || e.upgrade) err.upgrade = true
+    if (res.status === 402 || e.upgrade) { err.upgrade = true; window.dispatchEvent(new CustomEvent('rw-upgrade-required', { detail: err.message })) }
     throw err
   }
-  return res.json()
+  const data = await res.json()
+  if (path === '/auth/me') setStoredUser(data)
+  if (path.startsWith('/ai/') || (opts.method && /^(\/resumes|\/pay)/.test(path))) {
+    api.me().catch(() => {})
+  }
+  return data
 }
 
 export const api = {
@@ -80,7 +86,7 @@ export const api = {
 
   // 简历
   listResumes: () => request('/resumes'),
-  createResume: (name) => request('/resumes', { method: 'POST', body: { name } }),
+  createResume: (name, content = {}) => request('/resumes', { method: 'POST', body: { ...content, name } }),
   getResume: (id) => request(`/resumes/${id}`),
   updateResume: (id, patch) => request(`/resumes/${id}`, { method: 'PUT', body: patch }),
   deleteResume: (id) => request(`/resumes/${id}`, { method: 'DELETE' }),
@@ -122,5 +128,6 @@ export const api = {
   // 面试复盘
   listInterviews: () => request('/interviews'),
   addInterview: (data) => request('/interviews', { method: 'POST', body: data }),
+  deleteInterview: (id) => request(`/interviews/${id}`, { method: 'DELETE' }),
   updateInterview: (id, patch) => request(`/interviews/${id}`, { method: 'PUT', body: patch }),
 }

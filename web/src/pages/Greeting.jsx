@@ -41,7 +41,7 @@ export default function Greeting() {
     api.listResumes().then((list) => {
       setResumes(list)
       if (list[0]) loadResume(list[0].id)
-    })
+    }).catch(e => setError(e.message))
   }, [])
 
   function loadResume(id) {
@@ -49,7 +49,7 @@ export default function Greeting() {
     api.getResume(id).then((r) => {
       setResume(r)
       if (r.basics?.title && !position) setPosition(r.basics.title)
-    })
+    }).catch(e => setError(e.message))
   }
 
   async function generate() {

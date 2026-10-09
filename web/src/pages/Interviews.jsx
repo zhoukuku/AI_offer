@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 import Icon from '../components/Icon.jsx'
 
 export default function Interviews() {
+  const [params] = useSearchParams()
   const [list, setList] = useState(null)
   const [form, setForm] = useState({ company: '', position: '', questions: '', notes: '' })
   const [reviewing, setReviewing] = useState(false)
@@ -28,14 +30,17 @@ export default function Interviews() {
   const [mastered, setMastered] = useState({})
 
   function load() { api.listInterviews().then(setList).catch((e) => setError(e.message)) }
-  useEffect(load, [])
+  useEffect(() => {
+    load()
+    if (params.get('application')) api.listApplications().then(list => { const app = list.find(a => a.id === params.get('application')); if (app) setForm(p => ({...p, company:app.company, position:app.position, applicationId:app.id})) }).catch(e => setError(e.message))
+  }, [params])
 
   async function add() {
     if (!form.company.trim()) { setError('请填写公司名称'); return }
     setError(''); setReviewing(true)
     try {
       const rec = await api.addInterview(form)
-      clear()
+      clear(); load()
       const review = await api.review({ company: rec.company, position: rec.position, questions: rec.questions, notes: rec.notes })
       await api.updateInterview(rec.id, { review })
       load()
@@ -44,6 +49,16 @@ export default function Interviews() {
 
   function clear() { setForm({ company: '', position: '', questions: '', notes: '' }) }
   function toggle(id) { setExpanded(expanded === id ? null : id) }
+
+  async function rerunReview(record) {
+    setReviewing(true); setError('')
+    try { const review = await api.review(record); await api.updateInterview(record.id,{review}); load() }
+    catch(e) { setError(e.message) } finally { setReviewing(false) }
+  }
+  async function remove(record) {
+    if (!window.confirm('删除这条面试记录？')) return
+    try { await api.deleteInterview(record.id); load() } catch(e) { setError(e.message) }
+  }
 
   // ===== 模拟面试 =====
   async function startMock() {
@@ -256,16 +271,17 @@ export default function Interviews() {
               </div>
             )}
 
+            <div className="flex gap-8 mt-8"><button className="btn btn-sm" onClick={() => rerunReview(it)} disabled={reviewing}>重新复盘</button><button className="btn btn-sm btn-danger" onClick={() => remove(it)}>删除记录</button></div>
             {it.review && (
               <div className="mt-8">
                 <button className="btn btn-sm btn-ghost" onClick={() => toggle(it.id)}>
                   {expanded === it.id ? '收起复盘' : '展开 AI 复盘'}
                 </button>
-                {expanded === it.id && (
+                {expanded === it.id && it.review && (
                   <div className="mt-8" style={{ background: '#f8f9fb', padding: 14, borderRadius: 8, fontSize: 13 }}>
                     {it.review.summary && <p style={{ marginTop: 0 }}>{it.review.summary}</p>}
                     {it.review.strengths?.length > 0 && <div><b>优点</b><ul style={{ margin: '4px 0 8px', paddingLeft: 18 }}>{it.review.strengths.map((s, i) => <li key={i}>{s}</li>)}</ul></div>}
-                    {it.review.improvements?.length > 0 && <div><b>不足</b><ul style={{ margin: '4px 0 8px', paddingLeft: 18 }}>{it.review.improvements.map((s, i) => <li key={i}>{s}</li>)}</ul></div>}
+                    {(it.review.weaknesses || it.review.improvements)?.length > 0 && <div><b>不足</b><ul style={{ margin: '4px 0 8px', paddingLeft: 18 }}>{(it.review.weaknesses || it.review.improvements).map((s, i) => <li key={i}>{s}</li>)}</ul></div>}
                     {it.review.suggestions?.length > 0 && <div><b>建议</b><ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{it.review.suggestions.map((s, i) => <li key={i}>{s}</li>)}</ul></div>}
                   </div>
                 )}

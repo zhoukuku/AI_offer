@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import Layout from './components/Layout.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Editor from './pages/Editor.jsx'
@@ -37,6 +37,8 @@ function PublicOnly({ children }) {
   return children
 }
 
+function EditorRoute() { const {id} = useParams(); return <Editor key={id} /> }
+
 export default function App() {
   return (
     <Routes>
@@ -45,7 +47,7 @@ export default function App() {
       <Route path="/share/:token" element={<ShareView />} />
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route path="/app" element={<Dashboard />} />
-        <Route path="/resume/:id" element={<Editor />} />
+        <Route path="/resume/:id" element={<EditorRoute />} />
         <Route path="/ai" element={<AIChatPage />} />
         <Route path="/match" element={<JobMatch />} />
         <Route path="/companies" element={<Companies />} />

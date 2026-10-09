@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
 import Database from 'better-sqlite3'
 import config from '../config.js'
+import { resumePatch } from '../../../shared/resume.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, '../../data')
@@ -211,7 +212,7 @@ class Store {
 
   // 开通会员（模拟支付：直接写入 plan=pro 与到期时间）
   grantPlan(id, { planKey, days }) {
-    return this.updateUser(id, { plan: 'pro', planExpiresAt: Date.now() + days * 86400000, planKey })
+    return this.updateUser(id, { plan: 'pro', planExpiresAt: Math.max(Date.now(), this.findUserById(id)?.planExpiresAt || 0) + days * 86400000, planKey })
   }
 
   // 用户已保留的简历数量（用于免费档简历名额判断）
@@ -252,6 +253,35 @@ class Store {
     return changed
   }
 
+  // Reserve quota synchronously in one SQLite transaction, including multiple server processes.
+  reserveAI(userId, limit) {
+    return this.db.transaction(() => {
+      const user = this.findUserById(userId)
+      if (!user || (user.aiUsed || 0) >= limit) return false
+      this.updateUser(userId, { aiUsed: (user.aiUsed || 0) + 1 })
+      return true
+    })()
+  }
+
+  refundAI(userId) {
+    this.db.transaction(() => {
+      const user = this.findUserById(userId)
+      if (user) this.updateUser(userId, { aiUsed: Math.max(0, (user.aiUsed || 0) - 1) })
+    })()
+  }
+
+  createResumeWithContent(name, content, userId, max = -1) {
+    return this.db.transaction(() => {
+      if (max >= 0 && this.countResumes(userId) >= max) {
+        const error = new Error('简历名额已用完，请保存为当前简历的版本或升级会员')
+        error.status = 402
+        throw error
+      }
+      const resume = this.createResume(name, userId)
+      return this.updateResume(resume.id, content, userId)
+    })()
+  }
+
   // ===== 简历 =====
   listResumes(userId) {
     return this._byUser('resumes', userId).map((r) => ({
@@ -280,14 +310,17 @@ class Store {
   updateResume(id, patch, userId) {
     const r = this.getResume(id, userId)
     if (!r) return null
-    Object.assign(r, patch, { updatedAt: Date.now() })
+    Object.assign(r, resumePatch(patch), { updatedAt: Date.now() })
     return this._save('resumes', id, r, r.createdAt, r.updatedAt)
   }
 
   deleteResume(id, userId) {
     const r = this.getResume(id, userId)
     if (!r) return false
-    this.db.prepare('DELETE FROM resumes WHERE id = ?').run(id)
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM shares WHERE resumeId = ?').run(id)
+      this.db.prepare('DELETE FROM resumes WHERE id = ?').run(id)
+    })()
     return true
   }
 
@@ -310,6 +343,7 @@ class Store {
       deadline: app.deadline || '', // 截止日期 YYYY-MM-DD
       followUp: app.followUp || '', // 跟进日期 YYYY-MM-DD
       resumeId: app.resumeId || null,
+      jd: app.jd || '',
       userId,
       createdAt: Date.now(),
     }
@@ -319,7 +353,7 @@ class Store {
   updateApplication(id, patch, userId) {
     const rec = this._byUser('applications', userId).find((a) => a.id === id)
     if (!rec) return null
-    Object.assign(rec, patch, { updatedAt: Date.now() })
+    Object.assign(rec, Object.fromEntries(Object.entries(patch).filter(([key]) => !['id', 'userId', 'createdAt'].includes(key))), { updatedAt: Date.now() })
     return this._save('applications', id, rec, rec.createdAt, rec.updatedAt)
   }
 
@@ -337,14 +371,14 @@ class Store {
   }
 
   addInterview(rec, userId) {
-    const item = { id: genId(), ...rec, userId, createdAt: Date.now() }
+    const item = { ...rec, id: genId(), userId, createdAt: Date.now() }
     return this._save('interviews', item.id, item, item.createdAt, item.createdAt)
   }
 
   updateInterview(id, patch, userId) {
     const rec = this._byUser('interviews', userId).find((a) => a.id === id)
     if (!rec) return null
-    Object.assign(rec, patch, { updatedAt: Date.now() })
+    Object.assign(rec, Object.fromEntries(Object.entries(patch).filter(([key]) => !['id', 'userId', 'createdAt'].includes(key))), { updatedAt: Date.now() })
     return this._save('interviews', id, rec, rec.createdAt, rec.updatedAt)
   }
 

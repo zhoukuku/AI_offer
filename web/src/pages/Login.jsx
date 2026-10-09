@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { api, setToken, setStoredUser } from '../api.js'
 import Icon from '../components/Icon.jsx'
@@ -6,7 +6,8 @@ import Icon from '../components/Icon.jsx'
 export default function Login() {
   const nav = useNavigate()
   const [params] = useSearchParams()
-  const redirect = params.get('redirect') || '/app'
+  const requested = params.get('redirect') || '/app'
+  const redirect = requested.startsWith('/') && !requested.startsWith('//') && !requested.includes('\\') && !requested.startsWith('/login') ? requested : '/app'
 
   const [mode, setMode] = useState('login') // 'login' | 'register'
   const [account, setAccount] = useState('')
@@ -17,6 +18,10 @@ export default function Login() {
   const [countdown, setCountdown] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  const [demoLogin, setDemoLogin] = useState(false)
+  useEffect(() => { api.health().then(h => setDemoLogin(h.capabilities?.demoLogin)).catch(() => {}) }, [])
+  useEffect(() => { if (!countdown) return; const timer = setTimeout(() => setCountdown(n => n - 1), 1000); return () => clearTimeout(timer) }, [countdown])
 
   function validPhone() {
     return /^1\d{10}$/.test(phone.trim())
@@ -176,9 +181,9 @@ export default function Login() {
           </button>
         </form>
 
-        <div className="login-demo muted small">
+        {demoLogin && <div className="login-demo muted small">
           演示管理员账号：admin / admin123
-        </div>
+        </div>}
 
         <div className="login-foot muted small">
           登录即代表同意服务条款与隐私政策

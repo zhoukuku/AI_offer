@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import Icon from '../components/Icon.jsx'
 
@@ -12,7 +13,7 @@ const STATUS_COLOR = {
 }
 const SOURCES = ['官网', 'Boss直聘', '拉勾', '猎聘', '内推', '猎头', '其他']
 
-const EMPTY_FORM = { company: '', position: '', url: '', note: '', source: '', deadline: '', followUp: '' }
+const EMPTY_FORM = { company: '', position: '', url: '', note: '', source: '', deadline: '', followUp: '', resumeId: null }
 
 // 计算截止日期紧急程度
 function deadlineState(d) {
@@ -42,12 +43,14 @@ function followUpState(fu, status) {
 }
 
 export default function Applications() {
+  const nav = useNavigate()
+  const [resumes, setResumes] = useState([])
   const [list, setList] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [error, setError] = useState('')
 
   function load() { api.listApplications().then(setList).catch((e) => setError(e.message)) }
-  useEffect(load, [])
+  useEffect(() => { load(); api.listResumes().then(setResumes).catch(e => setError(e.message)) }, [])
 
   async function add() {
     if (!form.company.trim()) { setError('请填写公司名称'); return }
@@ -130,6 +133,7 @@ export default function Applications() {
         </div>
         <div className="flex gap-8 mt-16">
           <input className="input" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="备注（可选）" />
+          <select className="select" aria-label="投递使用的简历" value={form.resumeId || ''} onChange={e => setForm({...form,resumeId:e.target.value || null})}><option value="">未关联简历</option>{resumes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
           <button className="btn btn-primary" onClick={add}><Icon name="plus" size={16} />添加记录</button>
         </div>
       </div>
@@ -189,7 +193,7 @@ export default function Applications() {
                     </td>
                     <td className="muted" style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.note || '-'}</td>
                     <td className="muted small">{new Date(a.createdAt).toLocaleDateString('zh-CN')}</td>
-                    <td className="text-right"><button className="btn btn-sm btn-danger" onClick={() => remove(a.id)}>删除</button></td>
+                    <td className="text-right"><button className="btn btn-sm" onClick={() => nav(`/interviews?application=${a.id}`)}>面试复盘</button><button className="btn btn-sm btn-danger" onClick={() => remove(a.id)}>删除</button></td>
                   </tr>
                 )
               })}

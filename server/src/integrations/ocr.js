@@ -1,43 +1,20 @@
 import config from '../config.js'
 
-// ===== OCR（简历 / JD 解析）：可插拔服务商 =====
-// 默认 mock：返回一份内置示例 JD 文本，保证「上传截图 → 岗位适配」链路在无 OCR 服务时也能完整演示。
-// 真实接入：把 OCR_PROVIDER 设为 tencent / baidu，在 ocrTencent 中实现调用（见下方 TODO）。
-
-// ---------- mock 示例文本 ----------
-function mockOcrText(filename = '') {
-  const base = String(filename).replace(/\.(png|jpe?g|webp|pdf)$/i, '')
-  return (
-    `【职位】前端开发工程师（${base || '示例'}）\n` +
-    `【职责】\n` +
-    `1. 负责核心业务前端架构设计与开发，保障高性能与高可用；\n` +
-    `2. 参与组件库、工程化与性能优化体系建设；\n` +
-    `3. 与产品、设计、后端协作，推进项目按期高质量交付。\n` +
-    `【要求】\n` +
-    `1. 3 年以上前端开发经验，精通 JavaScript / TypeScript；\n` +
-    `2. 熟悉 React 或 Vue 及主流工程化工具链；\n` +
-    `3. 具备性能优化、组件化、微前端经验者优先；\n` +
-    `4. 有 Node.js 服务端经验优先，良好的沟通与协作能力。`
-  )
-}
-
-// ---------- 真实服务商接入点（示例：腾讯云 OCR）----------
-async function ocrTencent(buffer) {
-  // TODO: 调用腾讯云 OCR 通用印刷体识别（得先 npm i tencentcloud-sdk-nodejs 并配置 secretId/secretKey）
-  // const client = new OcrClient({ credential: { secretId, secretKey }, region: 'ap-guangzhou' })
-  // const res = await client.GeneralBasicOCR({ ImageBase64: buffer.toString('base64') })
-  // return res.TextDetections.map(t => t.DetectedText).join('\n')
-  throw new Error('OCR_PROVIDER=tencent 尚未实现：请在 integrations/ocr.js 接入腾讯云 OCR')
-}
-
-// 统一入口：buffer 为上传文件的二进制内容
 export async function ocrFile(buffer, filename = '') {
-  const provider = config.ocr.provider || 'mock'
-  if (provider === 'mock') return mockOcrText(filename)
-  if (provider === 'tencent') return ocrTencent(buffer)
-  throw new Error(`未知 OCR 服务商: ${provider}`)
+  if (config.ocr.provider !== 'openai' || !config.ocr.apiKey) {
+    throw Object.assign(new Error('截图识别尚未配置，请粘贴岗位文字或导入文本型 PDF / DOCX'), {status:503})
+  }
+  const mime = buffer.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? 'image/png'
+    : buffer[0] === 255 && buffer[1] === 216 ? 'image/jpeg'
+    : buffer.subarray(0,4).toString() === 'RIFF' && buffer.subarray(8,12).toString() === 'WEBP' ? 'image/webp' : null
+  if (!mime) throw Object.assign(new Error('请上传 PNG、JPEG 或 WebP 图片'), {status:400})
+  const response = await fetch(`${config.ocr.baseURL.replace(/\/$/,'')}/chat/completions`, {
+    method:'POST', signal:AbortSignal.timeout(60000), headers:{Authorization:`Bearer ${config.ocr.apiKey}`,'Content-Type':'application/json'},
+    body:JSON.stringify({model:config.ocr.model,...(/^deepseek-(flash|v4)/.test(config.ocr.model) ? {thinking:{type:'disabled'}} : {}),temperature:0,max_tokens:4096,messages:[{role:'user',content:[{type:'text',text:'提取图片中的全部文字，忠实保留姓名、数字和段落，不改写、不推测、不添加解释。'}, {type:'image_url',image_url:{url:`data:${mime};base64,${buffer.toString('base64')}`}}]}]}),
+  })
+  if (!response.ok) throw Object.assign(new Error(`识别服务请求失败 (${response.status})`), {status:502})
+  const data = await response.json(), text = data.choices?.[0]?.message?.content
+  if (typeof text !== 'string' || !text.trim()) throw Object.assign(new Error('图片中未识别到可用文字'),{status:422})
+  return text.trim()
 }
-
-export function isMockOcr() {
-  return (config.ocr.provider || 'mock') === 'mock'
-}
+export const isMockOcr = () => false

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import config from '../config.js'
 
 // ===== 短信验证码：可插拔服务商 =====
@@ -9,13 +10,17 @@ import config from '../config.js'
 const codeStore = new Map() // phone -> { code, expiresAt }
 
 function genCode() {
-  return String(Math.floor(100000 + Math.random() * 900000))
+  return String(crypto.randomInt(100000, 1000000))
 }
 
 // ---------- mock 实现 ----------
 async function sendMock(phone) {
+  if (!config.demo) throw new Error('短信服务尚未配置，生产环境不可回显验证码')
+  for (const [key, record] of codeStore) if (record.expiresAt < Date.now()) codeStore.delete(key)
+  const previous = codeStore.get(phone)
+  if (previous && previous.sentAt + 60000 > Date.now()) throw new Error('请在 60 秒后重新发送')
   const code = genCode()
-  codeStore.set(phone, { code, expiresAt: Date.now() + config.sms.codeTtl })
+  codeStore.set(phone, { code, sentAt: Date.now(), attempts: 0, expiresAt: Date.now() + config.sms.codeTtl })
   // mock 模式：不真正发送，直接把验证码交回接口层随响应返回
   return { delivered: false, code }
 }
@@ -27,6 +32,8 @@ function verifyMock(phone, code) {
     codeStore.delete(phone)
     return false
   }
+  rec.attempts++
+  if (rec.attempts > 5) { codeStore.delete(phone); return false }
   const ok = rec.code === String(code).trim()
   if (ok) codeStore.delete(phone) // 校验成功即销毁，防止重放
   return ok
@@ -52,7 +59,9 @@ const impls = {
 }
 
 export function getSms() {
-  return impls[config.sms.provider] || impls.mock
+  const provider = impls[config.sms.provider]
+  if (!provider) throw new Error('未知短信服务商，请检查配置')
+  return provider
 }
 
 export function isMockSms() {

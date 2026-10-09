@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
+import { normalizeResume } from '../../../shared/resume.js'
 import Icon from '../components/Icon.jsx'
 
 const PRESETS = [
@@ -32,6 +33,7 @@ export default function AIChatPage() {
   const [sectionText, setSectionText] = useState('')
   const [instruction, setInstruction] = useState('')
   const [result, setResult] = useState('')
+  const [rewriteDraft, setRewriteDraft] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
 
   // 语音
@@ -43,21 +45,21 @@ export default function AIChatPage() {
     api.listResumes().then((list) => {
       setResumes(list)
       if (list[0]) loadResume(list[0].id)
-    })
+    }).catch(e => setError(e.message))
   }, [])
 
   function loadResume(id) {
-    setCurrent(id)
+    setCurrent(id); setResult(''); setRewriteDraft(''); setSection('summary'); setMessages([])
     api.getResume(id).then((r) => {
       setResume(r)
       const s = SECTIONS[0]
       setSectionText(s.get(r))
-    })
+    }).catch(e => setError(e.message))
   }
 
   function changeSection(key) {
     setSection(key)
-    setResult('')
+    setResult(''); setRewriteDraft('')
     if (resume) {
       const s = SECTIONS.find((x) => x.key === key)
       setSectionText(s.get(resume))
@@ -72,13 +74,13 @@ export default function AIChatPage() {
     setMessages(next)
     setSending(true)
     try {
-      const r = await api.chat({ messages: next, resume })
+      const r = await api.chat({ messages: next.map(m => ({...m,role:m.role === 'user' ? 'user' : 'assistant'})), resume })
       setMessages([...next, { role: 'ai', content: r.reply }])
     } catch (e) { setError(e.message) } finally { setSending(false) }
   }
 
   async function analyze() {
-    setAnalyzing(true); setResult('分析中…'); setError('')
+    setAnalyzing(true); setRewriteDraft(''); setResult('分析中…'); setError('')
     try {
       const r = await api.analyze({ section, content: sectionText, targetRole: resume?.basics?.title || '' })
       setResult(formatAnalysis(r))
@@ -89,9 +91,24 @@ export default function AIChatPage() {
     setAnalyzing(true); setResult('改写中…'); setError('')
     try {
       const r = await api.rewrite({ section, content: sectionText, instruction, targetRole: resume?.basics?.title || '' })
-      setResult(typeof r === 'string' ? r : r.text || r.raw || JSON.stringify(r))
+      const draft = typeof r === 'string' ? r : r.text || ''
+      setResult(draft); setRewriteDraft(draft)
     } catch (e) { setError(e.message) } finally { setAnalyzing(false) }
   }
+
+  async function applyRewrite() {
+    if (!resume || !rewriteDraft) return
+    try {
+      let content = section === 'summary' ? rewriteDraft : JSON.parse(rewriteDraft.replace(/^```(?:json)?\s*|\s*```$/g, ''))
+      if (section !== 'summary' && (section === 'basics' ? !content || typeof content !== 'object' || Array.isArray(content) : !Array.isArray(content))) throw new Error('区域格式不正确，请保留原字段结构')
+      if (!window.confirm('请核实改写内容。确认后会备份原文并应用这个区域。')) return
+      const before = {id:'v'+Date.now(),name:'区域改写前备份',createdAt:Date.now(),content:normalizeResume(resume)}
+      const updated = await api.updateResume(current,{[section]:content,versions:[...(resume.versions || []),before]})
+      setResume(updated);setSectionText(SECTIONS.find(s=>s.key===section).get(updated));setRewriteDraft('');setResult('已应用并保存，原文已备份到版本快照')
+    } catch(e) {setError('应用失败：'+e.message)}
+  }
+
+  useEffect(() => () => { mediaRef.current?.stream?.getTracks().forEach(track => track.stop()) }, [])
 
   // 语音输入：录音 → 转写 → 填入输入框
   async function toggleRecord() {
@@ -184,6 +201,7 @@ export default function AIChatPage() {
             <button className="btn" onClick={analyze} disabled={analyzing}><Icon name="search" size={16} />分析该区域</button>
             <button className="btn btn-primary" onClick={rewrite} disabled={analyzing}><Icon name="pencil" size={16} />改写该区域</button>
           </div>
+          {rewriteDraft && <button className="btn btn-primary mb-16" onClick={applyRewrite}>确认并应用改写</button>}
           {result && <div className="card" style={{ background: '#f8f9fb', padding: 14, whiteSpace: 'pre-wrap', fontSize: 13 }}>{result}</div>}
         </div>
       </div>

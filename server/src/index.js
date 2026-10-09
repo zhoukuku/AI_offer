@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { extractRawText as mammothExtract } from 'mammoth'
 import config from './config.js'
+import { normalizeResume as normalizeContent } from '../../shared/resume.js'
 import store, { emptyResume } from './store/db.js'
 import { chat, isMock, aiStats } from './ai/index.js'
 import companies from './data/companies.js'
@@ -24,8 +25,19 @@ const pdfParse = require('pdf-parse')
 const DIST_DIR = path.join(__dirname, '../../web/dist')
 
 const app = express()
-app.use(cors())
+app.use(cors({ exposedHeaders: ['X-AI-Mode'] }))
+if (!config.demo && !config.auth.secret) throw new Error('生产模式必须设置 AUTH_SECRET')
 app.use(express.json({ limit: '5mb' }))
+const authAttempts = new Map()
+app.use('/api/auth', (req, res, next) => {
+  if (req.method !== 'POST') return next()
+  const now = Date.now(), key = req.ip + ':' + req.path
+  for (const [k, v] of authAttempts) if (v.until < now) authAttempts.delete(k)
+  const entry = authAttempts.get(key) || { count: 0, until: now + 15 * 60000 }
+  entry.count++; authAttempts.set(key, entry)
+  if (entry.count > 30) return res.status(429).json({ error: '请求过于频繁，请稍后重试' })
+  next()
+})
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } })
 
 // busboy 默认把上传文件名按 latin1 解码，中文文件名会变成 mojibake（å¨æ¶¦é…）。
@@ -47,7 +59,7 @@ function fixUploadName(req, _res, next) {
 
 // ===== 基础 =====
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mode: isMock ? 'mock' : 'live', time: Date.now(), ai: aiStats() })
+  res.json({ ok: true, mode: isMock ? 'local' : 'live', demo: config.demo, capabilities: { ai: isMock ? 'local' : 'live', translation: !isMock, ocr: config.ocr.provider === 'openai' && !!config.ocr.apiKey, asr: ['whisper', 'funasr'].includes(config.asr.provider) && !!config.asr.endpoint, payment: config.demo && isMockPayment(), demoLogin: config.demo && !!config.auth.demoAccount.account }, time: Date.now(), ai: aiStats() })
 })
 
 // 脱敏后的用户信息
@@ -104,8 +116,7 @@ function validPassword(s) {
 // 判定新注册用户的角色：管理员手机号命中，或（未配置管理员手机号时）首个注册用户自动成为管理员
 function roleForUser(phone) {
   const adminPhones = config.auth.adminPhones
-  const isFirst = store.countUsers() === 0
-  return adminPhones.includes(phone) || (isFirst && adminPhones.length === 0) ? 'admin' : 'user'
+  return adminPhones.includes(phone) ? 'admin' : 'user'
 }
 
 // 注册：账号 + 密码 + 手机号（短信验证码校验）
@@ -120,7 +131,7 @@ app.post('/api/auth/register', (req, res) => {
   if (!/^1\d{10}$/.test(phone)) return res.status(400).json({ error: '请输入正确的手机号' })
   if (!code) return res.status(400).json({ error: '请输入验证码' })
 
-  const valid = verifyCode(phone, code) || code === '123456'
+  const valid = verifyCode(phone, code)
   if (!valid) return res.status(400).json({ error: '验证码错误或已过期' })
 
   if (store.findUserByAccount(account)) return res.status(400).json({ error: '该账号已被注册' })
@@ -185,6 +196,7 @@ app.post('/api/pay/checkout', requireAuth, async (req, res) => {
   const planKey = String(req.body?.plan || '').trim()
   const plan = config.subscription.plans[planKey]
   if (!plan) return res.status(400).json({ error: '无效的套餐' })
+  if (!config.demo && isMockPayment()) return res.status(503).json({ error: '支付服务尚未配置，暂不可开通会员' })
   try {
     const order = await getPayment().checkout({ planKey, plan, days: plan.days, userId: req.user.id })
     if (order.url) {
@@ -221,12 +233,13 @@ app.put('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
 app.use(['/api/resumes', '/api/applications', '/api/interviews', '/api/ai'], requireAuth)
 // AI 能力统一消耗配额（免费档受限）；付费 / 试用 / 管理员不受限
 app.use('/api/ai', requireAIQuota)
+app.use(['/api/ai', '/api/resumes/import'], (req, res, next) => { res.set('X-AI-Mode', isMock ? 'local' : 'live'); next() })
 
 // ===== 简历 CRUD（登录用户只看自己的数据）=====
 app.get('/api/resumes', (req, res) => res.json(store.listResumes(req.user.id)))
 
 app.post('/api/resumes', requireResumeQuota, (req, res) => {
-  const resume = store.createResume(req.body?.name, req.user.id)
+  const resume = store.createResumeWithContent(req.body?.name, req.body || {}, req.user.id, planState(req.user).effective === 'pro' ? -1 : config.subscription.free.maxResumes)
   res.json(resume)
 })
 
@@ -237,7 +250,7 @@ app.get('/api/resumes/:id', (req, res) => {
 })
 
 app.put('/api/resumes/:id', (req, res) => {
-  const r = store.updateResume(req.params.id, req.body, req.user.id)
+  const r = store.updateResume(req.params.id, req.body || {}, req.user.id)
   if (!r) return res.status(404).json({ error: '简历不存在' })
   res.json(r)
 })
@@ -253,13 +266,13 @@ app.post('/api/resumes/import', requireResumeQuota, upload.single('file'), fixUp
   try {
     const file = req.file
     if (!file) return res.status(400).json({ error: '未收到文件' })
+    if (!/\.(txt|md|pdf|docx|png|jpe?g|webp)$/i.test(file.originalname || '')) return res.status(400).json({ error: '请上传 TXT、MD、PDF、DOCX 或图片简历' })
     const parsed = await parseResumeFile(file)
     const fileStem = (file.originalname || '导入简历').replace(/\.[^.]+$/, '')
     const parsedName = parsed?.basics?.name && parsed.basics.name !== '示例用户' ? parsed.basics.name : ''
     const name = parsedName ? `${parsedName} · ${fileStem}` : fileStem
-    const resume = store.createResume(name, req.user.id)
-    store.updateResume(resume.id, normalizeResume(parsed), req.user.id)
-    res.json(store.getResume(resume.id, req.user.id))
+    const resume = store.createResumeWithContent(name, normalizeContent(parsed), req.user.id, planState(req.user).effective === 'pro' ? -1 : config.subscription.free.maxResumes)
+    res.json(resume)
   } catch (e) { next(e) }
 })
 
@@ -315,7 +328,7 @@ app.post('/api/ai/rewrite', async (req, res, next) => {
     const { section, content, instruction, targetRole } = req.body || {}
     const prompt = JSON.stringify({ section, content, instruction, targetRole })
     const result = await chat({
-      system: '你是一名文案润色专家，请按照用户的修改指令改写简历片段，输出更专业、精炼、有说服力的文本。',
+      system: '你是一名文案润色专家，请按照用户的修改指令改写简历片段，输出更专业、精炼、有说服力的文本。' + ' 返回 {text:string}。当输入区域为 JSON 对象或数组时，text 必须是相同结构的合法 JSON 字符串，不改变公司名、职位、起止时间和真实数字。',
       prompt,
       kind: 'rewrite',
       json: true,
@@ -328,13 +341,13 @@ app.post('/api/ai/rewrite', async (req, res, next) => {
 app.post('/api/ai/chat', async (req, res, next) => {
   try {
     const { messages = [], resume } = req.body || {}
-    const last = [...messages].reverse().find((m) => m.role === 'user')
+    const history = messages.filter(m => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string').slice(-20)
     const system = resume
       ? `你是一名资深 HR 与简历专家，请基于用户简历进行对话式分析与建议。简历内容：${JSON.stringify(resume)}`
       : '你是一名资深 HR 与简历专家，请为用户提供简历优化建议。'
     const result = await chat({
       system,
-      prompt: last?.content || '',
+      prompt: JSON.stringify({ messages: history, resume }),
       kind: 'general',
       json: false,
     })
@@ -353,6 +366,12 @@ app.post('/api/ai/match', async (req, res, next) => {
       kind: 'match',
       json: true,
     })
+    if (result.adaptedResume && resume) {
+      const original = normalizeContent(resume)
+      result.adaptedResume.experience = original.experience.map((item, i) => ({ ...item, bullets: result.adaptedResume.experience[i]?.bullets || item.bullets }))
+      result.adaptedResume.education = original.education
+      result.adaptedResume.basics = { ...original.basics, title: result.adaptedResume.basics.title || original.basics.title }
+    }
     res.json(result)
   } catch (e) { next(e) }
 })
@@ -500,7 +519,7 @@ app.post('/api/ai/ocr', upload.single('file'), fixUploadName, async (req, res) =
     const text = await ocrFile(file.buffer, file.originalname || 'jd.png')
     res.json({ text, mock: isMockOcr() })
   } catch (e) {
-    res.status(502).json({ error: 'OCR 失败：' + e.message })
+    res.status(e.status || 502).json({ error: 'OCR 失败：' + e.message })
   }
 })
 
@@ -508,7 +527,7 @@ app.post('/api/ai/ocr', upload.single('file'), fixUploadName, async (req, res) =
 app.post('/api/ai/transcribe', upload.single('file'), fixUploadName, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: '未收到音频' })
-    const text = await transcribeAudio(req.file.buffer, req.file.originalname || '')
+    const text = await transcribeAudio(req.file.buffer, req.file.originalname || '', req.file.mimetype)
     res.json({ text })
   } catch (e) { next(e) }
 })
@@ -535,9 +554,14 @@ app.get('/api/companies/industries', (_req, res) => {
 // ===== 投递记录 =====
 app.get('/api/applications', (req, res) => res.json(store.listApplications(req.user.id)))
 
-app.post('/api/applications', (req, res) => res.json(store.addApplication(req.body || {}, req.user.id)))
+app.post('/api/applications', (req, res) => {
+  if (!String(req.body?.company || '').trim()) return res.status(400).json({error:'请填写公司名称'})
+  if (req.body.resumeId && !store.getResume(req.body.resumeId, req.user.id)) return res.status(400).json({error:'关联简历不存在'})
+  res.json(store.addApplication(req.body || {}, req.user.id))
+})
 
 app.put('/api/applications/:id', (req, res) => {
+  if (req.body?.resumeId && !store.getResume(req.body.resumeId, req.user.id)) return res.status(400).json({error:'关联简历不存在'})
   const rec = store.updateApplication(req.params.id, req.body || {}, req.user.id)
   if (!rec) return res.status(404).json({ error: '记录不存在' })
   res.json(rec)
@@ -551,7 +575,11 @@ app.delete('/api/applications/:id', (req, res) => {
 // ===== 面试复盘记录 =====
 app.get('/api/interviews', (req, res) => res.json(store.listInterviews(req.user.id)))
 
-app.post('/api/interviews', (req, res) => res.json(store.addInterview(req.body || {}, req.user.id)))
+app.post('/api/interviews', (req, res) => {
+  if (!String(req.body?.company || '').trim()) return res.status(400).json({error:'请填写公司名称'})
+  if (req.body.applicationId && !store.listApplications(req.user.id).some(a => a.id === req.body.applicationId)) return res.status(400).json({error:'关联投递不存在'})
+  res.json(store.addInterview(req.body || {}, req.user.id))
+})
 
 app.put('/api/interviews/:id', (req, res) => {
   const rec = store.updateInterview(req.params.id, req.body || {}, req.user.id)
@@ -637,17 +665,18 @@ if (fs.existsSync(DIST_DIR)) {
 // 统一错误处理
 app.use((err, _req, res, _next) => {
   console.error('[server error]', err)
-  res.status(err.status || 500).json({ error: err.message || '服务内部错误' })
+  res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : err.status || 500).json({ error: err.message || '服务内部错误' })
 })
 
 // 启动时确保存在一个演示管理员账号（账号密码登录用），便于本地快速体验
 function seedDemoAccount() {
+  if (!config.demo) return
   const { account, password, phone } = config.auth.demoAccount
   if (!account || store.findUserByAccount(account)) return
   const existing = store.findUserByPhone(phone)
   if (existing) {
-    // 复用已有用户补全账号密码（保留其历史数据）
-    store.updateUser(existing.id, { account, passwordHash: hashPassword(password), nickname: account, role: 'admin' })
+    // Never promote an existing user implicitly.
+    console.warn('演示账号手机号已被占用，跳过初始化')
   } else {
     store.createUser({ account, passwordHash: hashPassword(password), phone, nickname: account, role: 'admin' })
   }
@@ -657,7 +686,7 @@ seedDemoAccount()
 
 const server = app.listen(config.port, () => {
   console.log(`✅ 简历工作台后端已启动: http://localhost:${config.port}`)
-  console.log(`   AI 模式: ${isMock ? 'mock 演示（未配置 API Key）' : 'live（' + config.ai.model + '）'}`)
+  console.log(`   AI 模式: ${isMock ? '本地规则（未配置 API Key）' : 'live（' + config.ai.model + '）'}`)
   if (fs.existsSync(DIST_DIR)) console.log(`   前端静态资源已托管: ${DIST_DIR}`)
 })
 
@@ -701,7 +730,7 @@ async function extractTextFromFile(file) {
 
   try {
     if (ext === '.pdf') {
-      const data = await pdfParse(buf)
+      const data = await pdfParse(buf, { pagerender: renderPdfPage })
       const t = String(data?.text || '')
       return printable(t) > 10 ? t : ''
     }
@@ -710,6 +739,8 @@ async function extractTextFromFile(file) {
       const t = String(res?.value || '')
       return printable(t) > 10 ? t : ''
     }
+    if (['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) return await ocrFile(buf, name)
+    if (!['.txt', '.md'].includes(ext)) return ''
     // 旧版二进制 .doc：mammoth 无法解析，落到下方按文本编码探测兜底（部分 .doc 实为文本另存，可救回）
     // 若是真二进制 .doc，解码后 printable 过低会被过滤返回空串
   } catch (e) {
@@ -720,6 +751,23 @@ async function extractTextFromFile(file) {
   // 纯文本 / 兜底：按编码自动探测解码（UTF-8/BOM/UTF-16/GBK/GB18030），根治中文乱码
   const text = decodeText(buf)
   return printable(text) > 20 ? text : ''
+}
+
+// Preserve visible spacing between PDF text items, including phone/email on one line.
+async function renderPdfPage(page) {
+  const content = await page.getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false })
+  let text = '', previous
+  for (const item of content.items) {
+    if (!item.str) continue
+    const [,,, , x, y] = item.transform
+    if (previous) {
+      if (Math.abs(y - previous.y) > 2) text += '\n'
+      else if (x - previous.end > 2) text += ' '
+    }
+    text += item.str
+    previous = { y, end: x + (item.width || 0) }
+  }
+  return text
 }
 
 // 文本解码：自动探测编码并剥离控制字符（BOM/UTF-16/GBK 等），避免 GBK 编码文件导入乱码

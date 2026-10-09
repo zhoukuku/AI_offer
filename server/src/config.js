@@ -1,9 +1,12 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
+import { fileURLToPath } from 'node:url'
+dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) })
 
 // ===== AI 配置 =====
 // 通过 OpenAI 兼容接口接入任意大模型（DeepSeek / 豆包 / OpenAI / 本地 Ollama 等）。
 // 未配置 API Key 时自动走 mock 演示模式，全套流程仍可跑通。
 const config = {
+  demo: process.env.DEMO_MODE === 'true' || (process.env.NODE_ENV !== 'production' && process.env.DEMO_MODE !== 'false'),
   port: Number(process.env.PORT || 8787),
 
   // ===== 数据存储层 =====
@@ -24,11 +27,11 @@ const config = {
     //   OpenAI:    https://api.openai.com/v1
     //   本地 Ollama: http://localhost:11434/v1
     baseURL: process.env.AI_BASE_URL || 'https://api.deepseek.com/v1',
-    model: process.env.AI_MODEL || 'deepseek-chat',
+    model: process.env.AI_MODEL || 'deepseek-flash',
     // ===== 韧性参数（真实模型模式生效）=====
-    timeoutMs: Number(process.env.AI_TIMEOUT_MS || 45000), // 单次调用超时，超时自动降级
+    timeoutMs: Number(process.env.AI_TIMEOUT_MS || 60000), // 单次调用超时，超时明确失败
     retries: Number(process.env.AI_RETRIES || 1), // 可重试错误（网络/5xx/429）的重试次数
-    dailyLimit: Number(process.env.AI_DAILY_LIMIT || 500), // 当日真实模型调用熔断上限（0=不限），超出降级 mock
+    dailyLimit: Number(process.env.AI_DAILY_LIMIT || 500), // 当日真实模型调用熔断上限（0=不限），超出拒绝调用
   },
 
   // ===== 短信验证码 =====
@@ -50,6 +53,8 @@ const config = {
     provider: process.env.ASR_PROVIDER || 'mock',
     enabled: (process.env.ASR_PROVIDER || 'mock') !== 'mock', // 兼容旧字段
     endpoint: process.env.ASR_ENDPOINT || '',
+    apiKey: process.env.ASR_API_KEY || process.env.AI_API_KEY || '',
+    model: process.env.ASR_MODEL || 'whisper-1',
   },
 
   // ===== 用户认证 =====
@@ -75,8 +80,8 @@ const config = {
   subscription: {
     // 免费档限制
     free: {
-      maxResumes: Number(process.env.FREE_MAX_RESUMES || 1), // 免费档可同时保留的简历数
-      aiQuota: Number(process.env.FREE_AI_QUOTA || 2), // 免费档 AI 免费试用总次数（会员期不受限）
+      maxResumes: Number(process.env.FREE_MAX_RESUMES || 3), // 免费档可同时保留的简历数
+      aiQuota: Number(process.env.FREE_AI_QUOTA || 20), // 免费档 AI 免费试用总次数（会员期不受限）
     },
     // 会员套餐（价格单位：分）
     plans: {
@@ -99,6 +104,9 @@ const config = {
   // provider=tencent / baidu：调用真实 OCR（见 integrations/ocr.js）。
   ocr: {
     provider: process.env.OCR_PROVIDER || 'mock',
+    baseURL: process.env.OCR_BASE_URL || process.env.AI_BASE_URL || 'https://api.deepseek.com/v1',
+    apiKey: process.env.OCR_API_KEY || process.env.AI_API_KEY || '',
+    model: process.env.OCR_MODEL || process.env.AI_MODEL || 'deepseek-flash',
     secretId: process.env.OCR_SECRET_ID || '',
     secretKey: process.env.OCR_SECRET_KEY || '',
   },

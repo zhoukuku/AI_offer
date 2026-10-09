@@ -71,8 +71,7 @@ export default function Dashboard() {
     e.stopPropagation()
     try {
       const src = await api.getResume(r.id)
-      const dest = await api.createResume(`${src.name || r.name}（副本）`)
-      await api.updateResume(dest.id, {
+      await api.createResume(`${src.name || r.name}（副本）`, { template: src.template, accent: src.accent,
         basics: src.basics, summary: src.summary, experience: src.experience,
         education: src.education, projects: src.projects, skills: src.skills, honors: src.honors, custom: src.custom,
       })
@@ -155,6 +154,17 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <div className="card flow-card">
+        <div className="section-title">完成一次有针对性的投递</div>
+        <p className="muted small">先填写真实经历，再对照岗位调整内容，核实后导出；记录投递并沉淀面试反馈。</p>
+        <div className="flow-steps">
+          <button className="btn" onClick={() => fileRef.current?.click()}>1. 导入简历</button>
+          <button className="btn" onClick={() => list?.[0] ? nav(`/resume/${list[0].id}`) : create()}>2. 编辑与诊断</button>
+          <button className="btn" onClick={() => nav('/match')}>3. 对照岗位 JD</button>
+          <button className="btn" onClick={() => nav('/applications')}>4. 记录投递</button>
+          <button className="btn" onClick={() => nav('/interviews')}>5. 面试与复盘</button>
+        </div>
+      </div>
       {/* 统计 */}
       <div className="stat-grid">
         {statItems.map((s) => (

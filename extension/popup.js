@@ -1,102 +1,53 @@
-const $ = (id) => document.getElementById(id)
-
-let resumes = []
-let currentId = null
-let settings = { apiUrl: 'http://localhost:8787', workspaceUrl: 'http://localhost:5173' }
-
-function setMsg(text, ok = true) {
-  const m = $('msg')
-  m.textContent = text
-  m.className = 'msg ' + (ok ? 'ok' : 'err')
-}
-
-// 当前使用的后端地址（来自配置，缺省回退本地开发地址）
-function apiUrl() {
-  return settings.apiUrl || 'http://localhost:8787'
-}
-
-async function loadSettings() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(
-      { apiUrl: 'http://localhost:8787', workspaceUrl: 'http://localhost:5173' },
-      (s) => {
-        settings = s
-        if ($('apiUrl')) $('apiUrl').value = s.apiUrl
-        if ($('workspaceUrl')) $('workspaceUrl').value = s.workspaceUrl
-        resolve(s)
-      }
-    )
-  })
-}
-
-async function loadResumes() {
-  try {
-    const res = await fetch(`${apiUrl()}/api/resumes`)
-    resumes = await res.json()
-    const sel = $('resume')
-    sel.innerHTML = ''
-    resumes.forEach((r) => {
-      const opt = document.createElement('option')
-      opt.value = r.id
-      opt.textContent = r.name
-      sel.appendChild(opt)
-    })
-    chrome.storage.local.get('resumeId', ({ resumeId }) => {
-      if (resumeId && resumes.some((r) => r.id === resumeId)) {
-        currentId = resumeId
-        sel.value = resumeId
-      } else if (resumes[0]) {
-        currentId = resumes[0].id
-      }
-    })
-  } catch (e) {
-    setMsg('无法连接后端（' + apiUrl() + '），请确认工作台已启动并在上方配置正确地址', false)
+const $ = id => document.getElementById(id)
+let settings = {}, currentId = ''
+const defaults = {apiUrl:'http://localhost:8787',workspaceUrl:'http://localhost:5173',token:''}
+function setMsg(text,ok=true) { $('msg').textContent=text; $('msg').className='msg '+(ok?'ok':'err') }
+async function request(path, body) {
+  const response = await fetch(settings.apiUrl + '/api' + path,{method:body?'POST':'GET',headers:{...(body?{'Content-Type':'application/json'}:{}),...(settings.token?{Authorization:'Bearer '+settings.token}:{})},...(body?{body:JSON.stringify(body)}:{})})
+  const data = await response.json()
+  if (!response.ok) {
+    if (response.status===401) { settings.token=''; await chrome.storage.local.remove('token'); $('auth').hidden=false }
+    throw new Error(data.error || '请求失败')
   }
+  return data
 }
-
-$('resume').addEventListener('change', (e) => {
-  currentId = e.target.value
-  chrome.storage.local.set({ resumeId: currentId })
-})
-
-$('fill').addEventListener('click', async () => {
-  if (!currentId) return setMsg('请先选择简历', false)
+async function loadResumes() {
+  $('auth').hidden=!!settings.token
+  $('resume').replaceChildren(); currentId=''
+  if (!settings.token) return setMsg('请登录，与工作台共用账号',false)
   try {
-    const res = await fetch(`${apiUrl()}/api/resumes/${currentId}`)
-    const resume = await res.json()
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      chrome.tabs.sendMessage(tabs[0].id, { type: 'FILL_FORM', resume }, (resp) => {
-        if (chrome.runtime.lastError) setMsg('当前页面不支持填充（非网申页或需刷新后重试）', false)
-        else setMsg(resp?.filled > 0 ? `已填充 ${resp.filled} 个字段` : '未识别到可填充字段', resp?.filled > 0)
-      })
-    })
-  } catch (e) { setMsg('获取简历失败：' + e.message, false) }
-})
-
-$('record').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'SAVE_APPLICATION', data: {} }, (resp) => {
-    if (resp?.ok) setMsg('已记录本次投递 ✓')
-    else setMsg('记录失败：' + (resp?.error || '未知错误'), false)
-  })
-})
-
-$('open').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'OPEN_WORKSPACE' })
-})
-
-// 保存后端 / 工作台地址配置
-if ($('saveSettings')) {
-  $('saveSettings').addEventListener('click', () => {
-    settings.apiUrl = ($('apiUrl').value || '').trim() || 'http://localhost:8787'
-    settings.workspaceUrl = ($('workspaceUrl').value || '').trim() || 'http://localhost:5173'
-    chrome.storage.local.set(settings, () => {
-      setMsg('设置已保存 ✓')
-      loadResumes()
-    })
-  })
+    const list=await request('/resumes')
+    const {resumeId}=await chrome.storage.local.get('resumeId')
+    list.forEach(r => { const option=document.createElement('option');option.value=r.id;option.textContent=r.name;$('resume').appendChild(option) })
+    currentId=list.some(r => r.id===resumeId)?resumeId:list[0]?.id || ''
+    $('resume').value=currentId
+    await chrome.storage.local.set({resumeId:currentId})
+    setMsg(list.length?'简历已同步，可填充当前页面':'暂无简历，请在工作台创建',!!list.length)
+  } catch(e) {setMsg(e.message,false)}
 }
-
-;(async () => {
-  await loadSettings()
-  loadResumes()
-})()
+$('login').addEventListener('click',async () => {
+  try { const result=await request('/auth/login',{account:$('account').value.trim(),password:$('password').value});settings.token=result.token;await chrome.storage.local.set({token:result.token});$('password').value='';await loadResumes() } catch(e){setMsg(e.message,false)}
+})
+$('logout').addEventListener('click',async()=>{settings.token='';await chrome.storage.local.remove(['token','resumeId']);await loadResumes()})
+$('resume').addEventListener('change',async e => {currentId=e.target.value;await chrome.storage.local.set({resumeId:currentId})})
+$('fill').addEventListener('click',async () => {
+  if(!currentId)return setMsg('请先选择简历',false)
+  try {
+    const resume=await request('/resumes/'+currentId), [tab]=await chrome.tabs.query({active:true,currentWindow:true})
+    await chrome.scripting.executeScript({target:{tabId:tab.id},files:['content.js']})
+    const result=await chrome.tabs.sendMessage(tab.id,{type:'FILL_FORM',resume})
+    setMsg(result?.filled?`已填充 ${result.filled} 个字段，请核对后提交`:'未识别到空白字段',!!result?.filled)
+  } catch(e){setMsg('填充失败：'+e.message,false)}
+})
+$('record').addEventListener('click',()=>chrome.runtime.sendMessage({type:'SAVE_APPLICATION',data:{}},result=>setMsg(result?.ok?'投递已记录，请到工作台核实公司与岗位':result?.error || '记录失败',!!result?.ok)))
+$('open').addEventListener('click',()=>chrome.runtime.sendMessage({type:'OPEN_WORKSPACE'}))
+$('saveSettings').addEventListener('click',async () => {
+  try {
+    const api=new URL($('apiUrl').value),workspace=new URL($('workspaceUrl').value)
+    if (![api,workspace].every(u => ['http:','https:'].includes(u.protocol) && !u.username && !u.password)) throw new Error('请输入 HTTP / HTTPS 地址')
+    if (api.origin!==settings.apiUrl) settings.token=''
+    settings.apiUrl=api.origin;settings.workspaceUrl=workspace.origin
+    await chrome.storage.local.set(settings);await loadResumes()
+  } catch(e){setMsg(e.message,false)}
+})
+;(async()=>{settings=await chrome.storage.local.get(defaults);$('apiUrl').value=settings.apiUrl;$('workspaceUrl').value=settings.workspaceUrl;await loadResumes()})()

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import Icon from '../components/Icon.jsx'
 import { Preview } from '../components/Preview.jsx'
+import { normalizeResume } from '../../../shared/resume.js'
 import { TEMPLATES, getTemplate } from '../templates.js'
 
 const EMPTY_EXP = { company: '', role: '', start: '', end: '', city: '', bullets: '' }
@@ -44,6 +45,17 @@ export default function Editor() {
   const nav = useNavigate()
   const [resume, setResume] = useState(null)
   const [saved, setSaved] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const latest = useRef(null)
+  const dirty = useRef(false)
+  const writes = useRef(Promise.resolve())
+  latest.current = resume
+  dirty.current = !saved
+  function persist(content) {
+    const request = writes.current.catch(() => {}).then(() => api.updateResume(id, content))
+    writes.current = request
+    return request
+  }
   const [error, setError] = useState('')
   const [genOpen, setGenOpen] = useState(false)
   const [genForm, setGenForm] = useState({ name: '', role: '', industry: '', years: '', city: '' })
@@ -74,19 +86,43 @@ export default function Editor() {
 
   useEffect(() => {
     api.getResume(id).then((r) => {
-      setResume(r)
+      let draft
+      try { draft = JSON.parse(localStorage.getItem('rw_draft_' + id)) } catch {}
+      const restored = draft && draft.userId === r.userId && draft.updatedAt >= r.updatedAt
+      setResume(restored ? { ...r, ...draft } : { ...r, ...normalizeResume(r) })
+      setSaved(!restored)
       setTemplate(r.template || 'single')
       setAccent(r.accent || '#4f46e5')
     }).catch((e) => setError(e.message))
   }, [id])
 
+  useEffect(() => {
+    if (!resume || saved) return
+    localStorage.setItem('rw_draft_' + id, JSON.stringify({...resume, updatedAt: Date.now()}))
+    const timer = setTimeout(() => save().catch(() => {}), 800)
+    return () => clearTimeout(timer)
+  }, [resume, saved, id])
+
+  useEffect(() => {
+    const guard = e => { if (dirty.current) { e.preventDefault(); e.returnValue = '' } }
+    window.addEventListener('beforeunload', guard)
+    return () => {
+      window.removeEventListener('beforeunload', guard)
+      if (dirty.current && latest.current) persist(latest.current).catch(() => {})
+    }
+  }, [id])
+
   function patch(fn) { setResume((p) => fn(structuredClone(p))); setSaved(false) }
 
   async function save() {
+    const snapshot = latest.current
+    if (!snapshot) return
+    setSaving(true)
     try {
-      await api.updateResume(id, resume)
-      setSaved(true)
-    } catch (e) { setError(e.message) }
+      await persist(snapshot)
+      if (latest.current === snapshot) { setSaved(true); localStorage.removeItem('rw_draft_' + id) }
+    } catch (e) { setError('保存失败，草稿已保留在此浏览器：' + e.message); throw e }
+    finally { setSaving(false) }
   }
 
   async function doGenerate() {
@@ -94,8 +130,9 @@ export default function Editor() {
     setError('')
     try {
       const r = await api.generate(genForm)
-      // 合并：保留原 id / 名称 / 时间戳，替换内容
-      setResume((old) => ({ ...old, ...r, updatedAt: Date.now() }))
+      if ((resume.summary || resume.experience?.length) && !window.confirm('生成稿将替换正文，请核实。确认后会保存原文快照。')) return
+      const backup = {id:'v'+Date.now(),name:'生成前备份',createdAt:Date.now(),content:pickContent(resume)}
+      setResume((old) => ({ ...old, ...normalizeResume(r), versions:[...(old.versions || []),backup], updatedAt: Date.now() }))
       setSaved(false)
       setGenOpen(false)
     } catch (e) { setError(e.message) } finally { setGenLoading(false) }
@@ -106,7 +143,7 @@ export default function Editor() {
     setError('')
     try {
       const exp = resume.experience[idx]
-      const r = await api.experience({ company: exp.company, role: exp.role, industry: resume.basics?.title || '互联网', highlight: '' })
+      const r = await api.experience({ company: exp.company, role: exp.role, industry: resume.basics?.title || '互联网', highlight: exp.bullets || '' })
       const bullets = Array.isArray(r.bullets) ? r.bullets.join('\n') : r.bullets || exp.bullets
       patch((d) => { d.experience[idx].bullets = bullets; return d })
     } catch (e) { setError(e.message) } finally { setGenExpIdx(-1) }
@@ -148,7 +185,7 @@ export default function Editor() {
     setError('')
     try {
       // 连同当前正文一起持久化，避免快照与工作区内容不一致
-      await api.updateResume(id, { ...pickContent(resume), versions })
+      await persist({ ...pickContent(resume), versions })
       setResume((p) => ({ ...p, versions }))
       setSaved(true)
     } catch (e) { setError(e.message) }
@@ -161,7 +198,7 @@ export default function Editor() {
     setError('')
     setResume((p) => ({ ...p, ...pickContent(v.content), versions: p.versions || [] }))
     try {
-      await api.updateResume(id, pickContent(v.content))
+      await persist(pickContent(v.content))
       setSaved(true)
     } catch (e) { setError(e.message) }
   }
@@ -189,22 +226,27 @@ export default function Editor() {
       // 步骤 2：逐条调用优化并应用到副本
       setOptStep(2)
       const next = structuredClone(resume)
+      let changed = 0
       for (const it of items) {
         try {
           const r = await api.optimize({ resume: next, target: it.target })
           const text = typeof r === 'string' ? r : r.text || ''
           const t = it.target || {}
+          if (!text) continue
+          changed++
           if (t.type === 'experience' && next.experience?.[t.index]) next.experience[t.index].bullets = text
           else if (t.type === 'projects' && next.projects?.[t.index]) next.projects[t.index].description = text
           else next.summary = text
-        } catch { /* 单条失败跳过，不影响其余项 */ }
+        } catch (e) { throw new Error('生成建议失败：' + e.message) }
       }
-      setOptCount(items.length)
+      setOptCount(changed)
+      if (!window.confirm('已生成 ' + changed + ' 条建议。请核实事实；确认后会保存优化前快照并应用建议。')) { setOptStep(4); setOptAfter(s1.overall); return }
+      next.versions = [...(resume.versions || []), {id: 'v' + Date.now(), name: '优化前备份', createdAt: Date.now(), content: pickContent(resume)}]
 
       // 步骤 3：保存
       setOptStep(3)
       setResume(next)
-      await api.updateResume(id, pickContent(next))
+      await persist({ ...pickContent(next), versions: next.versions })
       setSaved(true)
 
       // 步骤 4：复检评分
@@ -230,6 +272,7 @@ export default function Editor() {
   async function openShare() {
     setShareLoading(true); setError('')
     try {
+      if (!saved) await save()
       const s = await api.createShare(id)
       setShareData({ ...s, url: `${window.location.origin}/share/${s.token}` })
       setShareOpen(true)
@@ -288,7 +331,7 @@ export default function Editor() {
         <div className="toolbar-section toolbar-main">
           <button className="btn btn-primary" onClick={() => setGenOpen(true)}><Icon name="sparkles" size={16} />从零生成</button>
           <button className="btn btn-primary-soft" onClick={doOneClickOptimize} disabled={optOpen}><Icon name="wand" size={16} />一键优化</button>
-          <button className="btn" onClick={save} disabled={saved}><Icon name="check" size={16} />{saved ? '已保存' : '保存'}</button>
+          <button className="btn" onClick={() => save().catch(() => {})} disabled={saved || saving}><Icon name="check" size={16} />{saving ? '保存中…' : saved ? '已保存' : '保存'}</button>
         </div>
 
         <div className="toolbar-divider" />
@@ -324,7 +367,7 @@ export default function Editor() {
                 className={`color-dot${accent === t.color ? ' active' : ''}`}
                 style={{ background: t.color }}
                 title={t.label}
-                onClick={() => { setAccent(t.color); api.updateResume(id, { accent: t.color }).catch((err) => setError(err.message)) }}
+                onClick={() => { setAccent(t.color); patch(d => ({...d, accent:t.color})) }}
               />
             ))}
           </div>
@@ -333,7 +376,7 @@ export default function Editor() {
         <div className="toolbar-spacer" />
 
         <div className="toolbar-section">
-          <button className="btn btn-primary" onClick={() => window.print()}><Icon name="download" size={15} />导出 PDF</button>
+          <button className="btn btn-primary" onClick={async () => { try { if (!saved) await save(); window.print() } catch {} }}><Icon name="download" size={15} />导出 PDF</button>
         </div>
       </div>
 
@@ -438,7 +481,7 @@ export default function Editor() {
       {genOpen && (
         <div className="modal-mask" onClick={() => setGenOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><span><Icon name="sparkles" size={16} />从零生成简历</span><span style={{ cursor: 'pointer' }} onClick={() => setGenOpen(false)}><Icon name="x" size={18} /></span></div>
+            <div className="modal-head"><span><Icon name="sparkles" size={16} />从零生成简历</span><button className="icon-btn" aria-label="关闭" onClick={() => setGenOpen(false)}><Icon name="x" size={18} /></button></div>
             <div className="modal-body">
               <p className="muted small">填写基础信息，AI 将为你生成一份结构完整、量化表达的简历（正文内容可稍后修改）。</p>
               <div className="row-2">
@@ -464,7 +507,7 @@ export default function Editor() {
           <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <span><Icon name="activity" size={16} />AI 简历体检报告</span>
-              <span style={{ cursor: 'pointer' }} onClick={() => setScoreOpen(false)}><Icon name="x" size={18} /></span>
+              <button className="icon-btn" aria-label="关闭" onClick={() => setScoreOpen(false)}><Icon name="x" size={18} /></button>
             </div>
             <div className="modal-body">
               <div className="score-overview">
@@ -538,7 +581,7 @@ export default function Editor() {
           <div className="modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <span><Icon name="search" size={16} />简历查重报告</span>
-              <span style={{ cursor: 'pointer' }} onClick={() => setDupOpen(false)}><Icon name="x" size={18} /></span>
+              <button className="icon-btn" aria-label="关闭" onClick={() => setDupOpen(false)}><Icon name="x" size={18} /></button>
             </div>
             <div className="modal-body">
               <div className="score-overview">
@@ -578,7 +621,7 @@ export default function Editor() {
           <div className="modal" style={{ maxWidth: 860 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <span><Icon name="image" size={16} />选择简历模板</span>
-              <button className="icon-btn" onClick={() => setTplOpen(false)}><Icon name="x" size={16} /></button>
+              <button className="icon-btn" aria-label="关闭" onClick={() => setTplOpen(false)}><Icon name="x" size={16} /></button>
             </div>
             <div className="modal-body" style={{ maxHeight: '72vh', overflow: 'auto' }}>
               <p className="muted small" style={{ marginTop: 0 }}>以下为你的简历在 9 套模板下的实时效果，点击即可切换（自动保存）。模板差异体现在版式结构上，主题色可在工具栏单独调整。</p>
@@ -589,7 +632,7 @@ export default function Editor() {
                     className={`tpl-card${template === t.key ? ' active' : ''}`}
                     onClick={() => {
                       setTemplate(t.key)
-                      api.updateResume(id, { template: t.key }).catch((err) => setError(err.message))
+                      patch(d => ({...d, template:t.key}))
                       setTplOpen(false)
                     }}
                   >
@@ -615,7 +658,7 @@ export default function Editor() {
           <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <span><Icon name="send" size={16} />分享投递链接</span>
-              <span style={{ cursor: 'pointer' }} onClick={() => setShareOpen(false)}><Icon name="x" size={18} /></span>
+              <button className="icon-btn" aria-label="关闭" onClick={() => setShareOpen(false)}><Icon name="x" size={18} /></button>
             </div>
             <div className="modal-body">
               {shareData ? (
@@ -646,7 +689,7 @@ export default function Editor() {
           <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <span><Icon name="sparkles" size={16} />一键优化整份简历</span>
-              <span style={{ cursor: 'pointer' }} onClick={() => setOptOpen(false)}><Icon name="x" size={18} /></span>
+              <button className="icon-btn" aria-label="关闭" onClick={() => setOptOpen(false)}><Icon name="x" size={18} /></button>
             </div>
             <div className="modal-body">
               <ol className="opt-steps">

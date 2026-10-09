@@ -1173,3 +1173,11 @@ input, textarea, select { font-family: inherit; font-size: 14px; color: var(--te
 .opt-step.done .opt-dot { background: var(--green); color: #fff; }
 .opt-score { margin-left: auto; font-size: 13px; color: var(--text-2); }
 .opt-result { margin-top: 14px; padding: 12px 14px; background: var(--primary-soft); border-radius: 10px; }
+.service-notice { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; padding: 12px 16px; border-radius: 10px; margin-bottom: 18px; font-size: 13px; line-height: 1.6; }
+.flow-card { margin-bottom: 20px; padding: 20px; }
+.flow-steps { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.flow-steps .btn { flex: 1; min-width: 130px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr !important; } .sidebar { width: 190px; } .content { margin-left: 190px; padding: 20px; } .editor-wrap { grid-template-columns: 1fr !important; } .table { display: block; overflow-x: auto; } }
+@media print { .service-notice, .flow-card { display: none !important; } .pv-item { break-inside: avoid; } }
+
+@media print { .content { margin-left: 0 !important; } .share-topbar, .share-foot { display:none !important; } .share-body { padding:0; } }
