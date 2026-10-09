@@ -48,9 +48,13 @@ export default function AIChatPage() {
     }).catch(e => setError(e.message))
   }, [])
 
+  const selection = useRef(0)
   function loadResume(id) {
+    const ticket = ++selection.current
+    setResume(null); setSectionText('')
     setCurrent(id); setResult(''); setRewriteDraft(''); setSection('summary'); setMessages([])
     api.getResume(id).then((r) => {
+      if (ticket !== selection.current) return
       setResume(r)
       const s = SECTIONS[0]
       setSectionText(s.get(r))
@@ -88,7 +92,7 @@ export default function AIChatPage() {
   }
 
   async function rewrite() {
-    setAnalyzing(true); setResult('改写中…'); setError('')
+    setAnalyzing(true); setRewriteDraft(''); setResult('改写中…'); setError('')
     try {
       const r = await api.rewrite({ section, content: sectionText, instruction, targetRole: resume?.basics?.title || '' })
       const draft = typeof r === 'string' ? r : r.text || ''
@@ -104,7 +108,7 @@ export default function AIChatPage() {
       if (!window.confirm('请核实改写内容。确认后会备份原文并应用这个区域。')) return
       const before = {id:'v'+Date.now(),name:'区域改写前备份',createdAt:Date.now(),content:normalizeResume(resume)}
       const updated = await api.updateResume(current,{[section]:section === 'basics' ? {...content, avatar: resume.basics?.avatar || ''} : content,versions:[...(resume.versions || []),before]})
-      setResume(updated);setSectionText(SECTIONS.find(s=>s.key===section).get(updated));setRewriteDraft('');setResult('已应用并保存，原文已备份到版本快照')
+      setResume(updated);setSectionText(SECTIONS.find(s=>s.key===section).get(updated));setRewriteDraft('');setResult('已应用并保存')
     } catch(e) {setError('应用失败：'+e.message)}
   }
 
@@ -154,7 +158,7 @@ export default function AIChatPage() {
 
       <div className="flex-center gap-8 mb-16">
         <span className="label" style={{ margin: 0 }}>选择简历</span>
-        <select className="select" style={{ maxWidth: 280 }} value={current} onChange={(e) => loadResume(e.target.value)}>
+        <select disabled={sending || analyzing} className="select" style={{ maxWidth: 280 }} value={current} onChange={(e) => loadResume(e.target.value)}>
           {resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
       </div>
@@ -185,7 +189,7 @@ export default function AIChatPage() {
           <div className="section-title mb-8">框选区域定向处理</div>
           <div className="field">
             <label className="label">选择区域</label>
-            <select className="select" value={section} onChange={(e) => changeSection(e.target.value)}>
+            <select disabled={analyzing || sending} className="select" value={section} onChange={(e) => changeSection(e.target.value)}>
               {SECTIONS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           </div>
@@ -201,7 +205,7 @@ export default function AIChatPage() {
             <button className="btn" onClick={analyze} disabled={analyzing}><Icon name="search" size={16} />分析该区域</button>
             <button className="btn btn-primary" onClick={rewrite} disabled={analyzing}><Icon name="pencil" size={16} />改写该区域</button>
           </div>
-          {rewriteDraft && <button className="btn btn-primary mb-16" onClick={applyRewrite}>确认并应用改写</button>}
+          {rewriteDraft && <button className="btn btn-primary mb-16" onClick={applyRewrite} disabled={analyzing || sending}>确认并应用改写</button>}
           {result && <div className="card" style={{ background: '#f8f9fb', padding: 14, whiteSpace: 'pre-wrap', fontSize: 13 }}>{result}</div>}
         </div>
       </div>

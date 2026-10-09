@@ -37,3 +37,13 @@ test('每日额度和输入长度拦截不消耗月度次数', async()=>{
   assert.equal((await server.request('/auth/me',{token})).data.quota.aiRemaining,4)
  } finally {await server.stop()}
 })
+
+test('管理员不能误禁用自己或移除自己的权限', async()=>{
+ const server=await startServer()
+ try {
+  const login=await server.request('/auth/login',{body:{account:'test_admin',password:'admin-password'}})
+  const id=login.data.user.id,token=login.data.token
+  for(const body of [{role:'user'},{status:'disabled'}]) assert.equal((await server.request('/admin/users/'+id,{token,method:'PUT',body})).status,400)
+  assert.equal((await server.request('/admin/stats',{token})).status,200)
+ } finally {await server.stop()}
+})

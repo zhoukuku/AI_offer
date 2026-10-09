@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api } from '../api.js'
+import { api, getStoredUser } from '../api.js'
 import Icon from '../components/Icon.jsx'
 import { Preview } from '../components/Preview.jsx'
 import ResumeCanvas from '../components/ResumeCanvas.jsx'
@@ -94,8 +94,8 @@ export default function Editor() {
       const restored = draft && draft.userId === r.userId && draft.updatedAt >= r.updatedAt
       setResume(restored ? { ...r, ...draft } : { ...r, ...normalizeResume(r) })
       setSaved(!restored)
-      setTemplate(r.template || 'single')
-      setAccent(r.accent || '#4f46e5')
+      setTemplate((restored ? draft.template : r.template) || 'single')
+      setAccent((restored ? draft.accent : r.accent) || '#4f46e5')
     }).catch((e) => setError(e.message))
   }, [id])
 
@@ -218,6 +218,8 @@ export default function Editor() {
 
   async function doOneClickOptimize() {
     if (optOpen) return
+    const remaining = getStoredUser()?.quota?.aiRemaining
+    if (remaining >= 0 && remaining < 3) { setError('一键优化至少需要 3 次 AI 额度，请使用单段 AI 润色或开通会员'); return }
     setOptOpen(true); setOptErr(''); setOptStep(1); setOptBefore(null); setOptAfter(null); setOptCount(0)
     setError('')
     try {
@@ -244,7 +246,7 @@ export default function Editor() {
         } catch (e) { throw new Error('生成建议失败：' + e.message) }
       }
       setOptCount(changed)
-      if (!window.confirm('已生成 ' + changed + ' 条建议。请核实事实；确认后会保存优化前快照并应用建议。')) { setOptStep(4); setOptAfter(s1.overall); return }
+      if (!window.confirm('已生成 ' + changed + ' 条建议。请核实事实；确认后会保存优化前快照并应用建议。')) { setOptCount(0); setOptErr('已取消应用，简历保持原样'); setOptStep(4); setOptAfter(s1.overall); return }
       next.versions = [...(resume.versions || []), {id: 'v' + Date.now(), name: '优化前备份', createdAt: Date.now(), content: pickContent(resume)}]
 
       // 步骤 3：保存
@@ -372,7 +374,7 @@ export default function Editor() {
 
       <div className="editor-wrap">
         {/* ===== 左侧：结构化表单 ===== */}
-        <div className="editor-form">
+        <fieldset className="editor-form" disabled={genLoading || transLoading || optOpen || genExpIdx >= 0 || !!applyingId}>
           <div className="editor-outline no-print" aria-label="编辑章节">{["基本信息", "个人总结", "工作经历", "教育经历", "项目经历", "技能", "荣誉奖项"].map(title => <button key={title} onClick={() => document.getElementById(`edit-${title}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{title}</button>)}</div>
           <Section title="基本信息">
             <div className="photo-upload-row">
@@ -473,7 +475,7 @@ export default function Editor() {
           <Section title="荣誉奖项">
             <textarea className="textarea" rows={3} value={(resume.honors || []).join('\n')} onChange={(e) => patch((d) => { d.honors = e.target.value.split('\n').filter(Boolean); return d })} placeholder="每行一条荣誉" />
           </Section>
-        </div>
+        </fieldset>
 
         {/* ===== 右侧：预览 ===== */}
         <ResumeCanvas resume={resume} template={template} accent={accent} />

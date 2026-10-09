@@ -225,6 +225,7 @@ app.get('/api/admin/users', requireAuth, requireAdmin, (_req, res) => {
 
 app.put('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
   const { role, status, nickname } = req.body || {}
+  if (req.params.id === req.user.id && (role === 'user' || status === 'disabled')) return res.status(400).json({ error: '不能取消自己的管理员权限或禁用自己的账号，请由其他管理员操作' })
   const patch = {}
   if (role === 'admin' || role === 'user') patch.role = role
   if (status === 'active' || status === 'disabled') patch.status = status

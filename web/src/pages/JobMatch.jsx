@@ -34,10 +34,12 @@ export default function JobMatch() {
     api.listResumes().then((list) => { setResumes(list); if (list[0]) load(list[0].id) }).catch(e => setError(e.message))
   }, [])
 
+  const selection = useRef(0)
   function load(id) {
+    const ticket = ++selection.current
     setCurrent(id)
     setResult(null); setResume(null); setSaveMsg(''); setShowPreview(false)
-    api.getResume(id).then(r => { setResume(r); setPosition(r.basics?.title || '') }).catch(e => setError(e.message))
+    api.getResume(id).then(r => { if (ticket !== selection.current) return; setResume(r); setPosition(r.basics?.title || '') }).catch(e => setError(e.message))
   }
 
   async function handleFile(e) {
@@ -46,7 +48,7 @@ export default function JobMatch() {
     setOcrLoading(true); setError('')
     try {
       const r = await api.ocr(file)
-      setJd(r.text)
+      setJd(r.text); setResult(null); setSaveMsg('')
     } catch (err) { setError(err.message) } finally { setOcrLoading(false) }
   }
 
@@ -67,6 +69,7 @@ export default function JobMatch() {
   }
 
   async function doMatch() {
+    if (ocrLoading) { setError('请等待岗位截图识别完成'); return }
     if (!resume) { setError('请先选择或导入简历'); return }
     if (!jd.trim()) { setError('请先粘贴 JD 或上传岗位截图'); return }
     setMatching(true); setError(''); setResult(null); setSaveMsg(''); setShowPreview(false)
@@ -79,7 +82,7 @@ export default function JobMatch() {
   async function saveAsNew() {
     setSaving(true); setError('')
     try {
-      const created = await api.createResume(`适配 ${position || '岗位'} 版本`, { ...normalizeResume(result.adaptedResume), template: resume?.template || 'single', accent: resume?.accent || '#4f46e5' })
+      const created = await api.createResume(`适配 ${position || '岗位'} 版本`, { ...normalizeResume(result.adaptedResume), basics: {...normalizeResume(result.adaptedResume).basics, avatar: resume.basics?.avatar || ''}, template: resume?.template || 'single', accent: resume?.accent || '#4f46e5' })
       nav(`/resume/${created.id}`)
     } catch (e) { setError(e.message) } finally { setSaving(false) }
   }
@@ -89,8 +92,8 @@ export default function JobMatch() {
     setSaving(true); setError('')
     try {
       const before = {id:'v' + Date.now(),name:'岗位适配前备份',createdAt:Date.now(),content:normalizeResume(resume)}
-      const after = await api.updateResume(current, { ...normalizeResume(result.adaptedResume), versions:[...(resume.versions || []),before] })
-      setResume(after); setSaveMsg('已应用适配稿，原文已保存到版本快照')
+      const after = await api.updateResume(current, { ...normalizeResume(result.adaptedResume), basics: {...normalizeResume(result.adaptedResume).basics, avatar: resume.basics?.avatar || ''}, versions:[...(resume.versions || []),before] })
+      setResume(after); setSaveMsg('已应用并保存适配稿')
     } catch (e) { setError(e.message) } finally { setSaving(false) }
   }
 
@@ -122,7 +125,7 @@ export default function JobMatch() {
           <div className="field">
             <label className="label">选择简历</label>
             <div className="flex gap-8">
-              <select className="select" value={current} onChange={(e) => load(e.target.value)} style={{ flex: 1 }}>
+              <select disabled={matching || saving || importing} className="select" value={current} onChange={(e) => load(e.target.value)} style={{ flex: 1 }}>
                 {resumes.length ? resumes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)
                   : <option value="">（暂无简历，请先导入）</option>}
               </select>
@@ -140,7 +143,7 @@ export default function JobMatch() {
           <div className="field"><label className="label">岗位链接（可选）</label><input className="input" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…" /></div>
           <div className="field">
             <label className="label">岗位 JD</label>
-            <textarea className="textarea" rows={10} value={jd} onChange={(e) => setJd(e.target.value)} placeholder="粘贴招聘岗位描述（职责 / 要求）…" />
+            <textarea className="textarea" rows={10} value={jd} disabled={matching || saving} onChange={(e) => { setJd(e.target.value); setResult(null); setSaveMsg('') }} placeholder="粘贴招聘岗位描述（职责 / 要求）…" />
           </div>
           <div className="flex gap-8 mb-16 wrap">
             <button className="btn" onClick={() => fileRef.current?.click()} disabled={ocrLoading}>

@@ -1289,3 +1289,4 @@ body { background-image: none; }
 .preview .pv-head-with-photo > div:first-child { min-width: 0; }
 .pv-head-photo-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .preview.tpl-classic .pv-avatar { margin: 0 auto 12px; }
+fieldset.editor-form { border: 0; margin: 0; padding: 0 5px 0 0; min-inline-size: 0; }
