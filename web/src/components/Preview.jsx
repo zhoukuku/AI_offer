@@ -175,7 +175,8 @@ export function Preview({ resume, template = 'single', accent = '#4f46e5' }) {
   }
 
   // ---- 版式骨架 ----
-  const mainCol = <>{summary}{experience}{projects}</>
+  const custom = (resume.custom || []).filter(s=>s.title || s.content).map((s,i)=><Section key={i} traits={traits} title={s.title || '补充信息'}><p className="pv-summary">{s.content}</p></Section>)
+  const mainCol = <>{summary}{experience}{projects}{custom}</>
   const asideCol = <>{skills}{education}{honors}</>
 
   let body

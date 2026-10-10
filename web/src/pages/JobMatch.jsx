@@ -49,7 +49,7 @@ export default function JobMatch() {
     try {
       const r = await api.ocr(file)
       setJd(r.text); setResult(null); setSaveMsg('')
-    } catch (err) { setError(err.message) } finally { setOcrLoading(false) }
+    } catch (err) { setError(err.message) } finally { setOcrLoading(false);if(fileRef.current)fileRef.current.value='' }
   }
 
   // 本页导入旧简历：解析后自动刷新列表并选中，无需跳转到其他页面
@@ -146,11 +146,11 @@ export default function JobMatch() {
             <textarea className="textarea" rows={10} value={jd} disabled={matching || saving} onChange={(e) => { setJd(e.target.value); setResult(null); setSaveMsg('') }} placeholder="粘贴招聘岗位描述（职责 / 要求）…" />
           </div>
           <div className="flex gap-8 mb-16 wrap">
-            <button className="btn" onClick={() => fileRef.current?.click()} disabled={ocrLoading}>
+            <button className="btn" onClick={() => fileRef.current?.click()} disabled={ocrLoading || matching || saving || importing}>
               {ocrLoading ? '识别中…' : <><Icon name="image" size={16} />上传岗位截图识别</>}
             </button>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
-            <button className="btn btn-primary" onClick={doMatch} disabled={matching || !resume}>
+            <button className="btn btn-primary" onClick={doMatch} disabled={matching || saving || importing || ocrLoading || !resume}>
               {matching ? '适配中…' : <><Icon name="target" size={16} />开始适配</>}
             </button>
           </div>

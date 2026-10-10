@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { normalizeResume } from '../../../shared/resume.js'
 import Icon from '../components/Icon.jsx'
+import AIResponse from '../components/AIResponse.jsx'
+import SectionEditor from '../components/SectionEditor.jsx'
 
 const PRESETS = [
   '帮我看看这份简历有哪些可以优化的地方？',
@@ -35,6 +37,9 @@ export default function AIChatPage() {
   const [result, setResult] = useState('')
   const [rewriteDraft, setRewriteDraft] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
+  const [applying,setApplying] = useState(false)
+  const [undo,setUndo] = useState(null)
+  const [asrAvailable,setAsrAvailable] = useState(false)
 
   // 语音
   const [recording, setRecording] = useState(false)
@@ -42,6 +47,7 @@ export default function AIChatPage() {
   const chunksRef = useRef([])
 
   useEffect(() => {
+    api.health().then(h=>setAsrAvailable(!!h.capabilities?.asr)).catch(()=>{})
     api.listResumes().then((list) => {
       setResumes(list)
       if (list[0]) loadResume(list[0].id)
@@ -52,7 +58,7 @@ export default function AIChatPage() {
   function loadResume(id) {
     const ticket = ++selection.current
     setResume(null); setSectionText('')
-    setCurrent(id); setResult(''); setRewriteDraft(''); setSection('summary'); setMessages([])
+    setUndo(null); setCurrent(id); setResult(''); setRewriteDraft(''); setSection('summary'); setMessages([])
     api.getResume(id).then((r) => {
       if (ticket !== selection.current) return
       setResume(r)
@@ -72,7 +78,7 @@ export default function AIChatPage() {
 
   async function send(text) {
     const content = (text ?? input).trim()
-    if (!content || sending) return
+    if (!content || sending || analyzing || applying || !resume) return
     setInput('')
     const next = [...messages, { role: 'user', content }]
     setMessages(next)
@@ -87,7 +93,7 @@ export default function AIChatPage() {
     setAnalyzing(true); setRewriteDraft(''); setResult('分析中…'); setError('')
     try {
       const r = await api.analyze({ section, content: sectionText, targetRole: resume?.basics?.title || '' })
-      setResult(formatAnalysis(r))
+      setResult(r)
     } catch (e) { setError(e.message) } finally { setAnalyzing(false) }
   }
 
@@ -101,15 +107,24 @@ export default function AIChatPage() {
   }
 
   async function applyRewrite() {
-    if (!resume || !rewriteDraft) return
+    if (!resume || !rewriteDraft || applying) return
+    setApplying(true);setError('')
     try {
       let content = section === 'summary' ? rewriteDraft : JSON.parse(rewriteDraft.replace(/^```(?:json)?\s*|\s*```$/g, ''))
       if (section !== 'summary' && (section === 'basics' ? !content || typeof content !== 'object' || Array.isArray(content) : !Array.isArray(content))) throw new Error('区域格式不正确，请保留原字段结构')
       if (!window.confirm('请核实改写内容。确认后会备份原文并应用这个区域。')) return
       const before = {id:'v'+Date.now(),name:'区域改写前备份',createdAt:Date.now(),content:normalizeResume(resume)}
       const updated = await api.updateResume(current,{[section]:section === 'basics' ? {...content, avatar: resume.basics?.avatar || ''} : content,versions:[...(resume.versions || []),before]})
+      setUndo({resumeId:current,section,value:structuredClone(resume[section]),after:updated[section]})
       setResume(updated);setSectionText(SECTIONS.find(s=>s.key===section).get(updated));setRewriteDraft('');setResult('已应用并保存')
-    } catch(e) {setError('应用失败：'+e.message)}
+    } catch(e) {setError('应用失败：'+e.message)} finally {setApplying(false)}
+  }
+  async function undoRewrite() {
+    if(!undo || applying || undo.resumeId!==current) return
+    if(JSON.stringify(resume[undo.section])!==JSON.stringify(undo.after) && !window.confirm('这个区域后来又有修改。是否恢复应用前的内容？')) return
+    setApplying(true);setError('')
+    try {const updated=await api.updateResume(current,{[undo.section]:undo.value});setResume(updated);setSectionText(SECTIONS.find(s=>s.key===section).get(updated));setUndo(null);setResult('已撤销并保存')}
+    catch(e){setError('撤销失败：'+e.message)}finally{setApplying(false)}
   }
 
   useEffect(() => () => { mediaRef.current?.stream?.getTracks().forEach(track => track.stop()) }, [])
@@ -167,20 +182,20 @@ export default function AIChatPage() {
         {/* 对话区 */}
         <div className="card chat-box">
           <div className="chat-presets" style={{ padding: '10px 16px 0' }}>
-            {presets.map((p) => <button key={p} onClick={() => send(p)}>{p}</button>)}
+            {presets.map((p) => <button key={p} disabled={sending || analyzing || applying || !resume} onClick={() => send(p)}>{p}</button>)}
           </div>
           <div className="chat-msgs">
             {messages.map((m, i) => (
-              <div key={i} className={`msg ${m.role === 'user' ? 'msg-user' : 'msg-ai'}`}>{m.content}</div>
+              <div key={i} className={`msg ${m.role === 'user' ? 'msg-user' : 'msg-ai'}`}>{m.role==='user' ? m.content : <AIResponse content={m.content}/>}</div>
             ))}
             {sending && <div className="msg msg-ai muted">思考中…</div>}
           </div>
           <div className="chat-input">
-            <button className={`rec-btn ${recording ? 'recording' : ''}`} onClick={toggleRecord} title="语音输入">
+            <button className={`rec-btn ${recording ? 'recording' : ''}`} onClick={toggleRecord} disabled={!asrAvailable || analyzing || applying || sending} title={asrAvailable?'语音输入':'语音服务尚未接入'}>
               {recording ? '■' : <Icon name="mic" size={18} />}
             </button>
-            <textarea className="textarea" rows={2} value={input} placeholder="输入你的问题…（Enter 换行）" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
-            <button className="btn btn-primary" onClick={() => send()} disabled={sending || !input.trim()}><Icon name="send" size={16} />发送</button>
+            <textarea className="textarea" rows={2} value={input} placeholder="输入你的问题…（Enter 发送，Shift+Enter 换行）" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
+            <button className="btn btn-primary" onClick={() => send()} disabled={sending || analyzing || applying || !resume || !input.trim()}><Icon name="send" size={16} />发送</button>
           </div>
         </div>
 
@@ -189,35 +204,27 @@ export default function AIChatPage() {
           <div className="section-title mb-8">框选区域定向处理</div>
           <div className="field">
             <label className="label">选择区域</label>
-            <select disabled={analyzing || sending} className="select" value={section} onChange={(e) => changeSection(e.target.value)}>
+            <select disabled={analyzing || sending || applying} className="select" value={section} onChange={(e) => changeSection(e.target.value)}>
               {SECTIONS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           </div>
           <div className="field">
             <label className="label">区域内容（可编辑）</label>
-            <textarea className="textarea" rows={6} value={sectionText} onChange={(e) => setSectionText(e.target.value)} />
+            <SectionEditor section={section} value={sectionText} onChange={setSectionText} disabled={analyzing || sending || applying}/>
           </div>
           <div className="field">
             <label className="label">修改指令（改写时生效，可选）</label>
             <input className="input" value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="例如：改得更简洁、突出量化结果" />
           </div>
           <div className="flex gap-8 mb-16">
-            <button className="btn" onClick={analyze} disabled={analyzing}><Icon name="search" size={16} />分析该区域</button>
-            <button className="btn btn-primary" onClick={rewrite} disabled={analyzing}><Icon name="pencil" size={16} />改写该区域</button>
+            <button className="btn" onClick={analyze} disabled={analyzing || sending || applying || !resume || !sectionText.trim()}><Icon name="search" size={16} />分析该区域</button>
+            <button className="btn btn-primary" onClick={rewrite} disabled={analyzing || sending || applying || !resume || !sectionText.trim()}><Icon name="pencil" size={16} />改写该区域</button>
           </div>
-          {rewriteDraft && <button className="btn btn-primary mb-16" onClick={applyRewrite} disabled={analyzing || sending}>确认并应用改写</button>}
-          {result && <div className="card" style={{ background: '#f8f9fb', padding: 14, whiteSpace: 'pre-wrap', fontSize: 13 }}>{result}</div>}
+          {undo && <button className="btn mb-16" onClick={undoRewrite} disabled={applying || analyzing || sending}>撤销区域改写</button>}
+          {rewriteDraft && <button className="btn btn-primary mb-16" onClick={applyRewrite} disabled={analyzing || sending || applying}>确认并应用改写</button>}
+          {result && <div className="card" style={{ background: '#f8f9fb', padding: 14, fontSize: 13 }}><AIResponse content={result}/></div>}
         </div>
       </div>
     </div>
   )
-}
-
-function formatAnalysis(r) {
-  const lines = []
-  if (r.score != null) lines.push(`【评分】${r.score} 分\n`)
-  if (r.strengths?.length) lines.push('【优点】\n' + r.strengths.map((s) => `· ${s}`).join('\n') + '\n')
-  if (r.weaknesses?.length) lines.push('【不足】\n' + r.weaknesses.map((s) => `· ${s}`).join('\n') + '\n')
-  if (r.suggestions?.length) lines.push('【建议】\n' + r.suggestions.map((s) => `· ${s}`).join('\n'))
-  return lines.join('\n') || JSON.stringify(r)
 }

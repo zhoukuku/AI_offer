@@ -54,6 +54,8 @@ export default function Editor() {
   const [undo, setUndo] = useState(null)
   const latest = useRef(null)
   const dirty = useRef(false)
+  const draftAvailable=useRef(true)
+  const [previewStatus,setPreviewStatus]=useState({ready:false})
   const writes = useRef(Promise.resolve())
   latest.current = resume
   dirty.current = !saved
@@ -91,7 +93,10 @@ export default function Editor() {
   const [optErr, setOptErr] = useState('')
 
   useEffect(() => {
+    let active=true
+    setResume(null);setChange(null);setUndo(null);setError('')
     api.getResume(id).then((r) => {
+      if (!active) return
       let draft
       try { draft = JSON.parse(localStorage.getItem('rw_draft_' + id)) } catch {}
       const restored = draft && draft.userId === r.userId && draft.updatedAt >= r.updatedAt
@@ -99,12 +104,14 @@ export default function Editor() {
       setSaved(!restored)
       setTemplate((restored ? draft.template : r.template) || 'single')
       setAccent((restored ? draft.accent : r.accent) || '#4f46e5')
-    }).catch((e) => setError(e.message))
+    }).catch((e) => {if(active)setError(e.message)})
+    return ()=>{active=false}
   }, [id])
 
   useEffect(() => {
     if (!resume || saved) return
-    localStorage.setItem('rw_draft_' + id, JSON.stringify({...resume, updatedAt: Date.now()}))
+    try {localStorage.setItem('rw_draft_' + id, JSON.stringify({...resume, updatedAt: Date.now()}));draftAvailable.current=true}
+    catch {draftAvailable.current=false;setError('浏览器无法保留本地草稿，正在尝试云端保存；请保持页面打开')}
     const timer = setTimeout(() => save().catch(() => {}), 800)
     return () => clearTimeout(timer)
   }, [resume, saved, id])
@@ -154,8 +161,8 @@ export default function Editor() {
     setSaving(true)
     try {
       await persist(snapshot)
-      if (latest.current === snapshot) { setSaved(true); localStorage.removeItem('rw_draft_' + id) }
-    } catch (e) { setError('保存失败，草稿已保留在此浏览器：' + e.message); throw e }
+      if (latest.current === snapshot) { setSaved(true); try {localStorage.removeItem('rw_draft_' + id)} catch {} }
+    } catch (e) { setError((draftAvailable.current ? '保存失败，草稿已保留在此浏览器：' : '保存失败且本地草稿不可用，请保持页面打开并重试：') + e.message); throw e }
     finally { setSaving(false) }
   }
 
@@ -166,7 +173,8 @@ export default function Editor() {
       const r = await api.generate(genForm)
       if ((resume.summary || resume.experience?.length) && !window.confirm('生成稿将替换正文，请核实。确认后会保存原文快照。')) return
       const backup = {id:'v'+Date.now(),name:'生成前备份',createdAt:Date.now(),content:pickContent(resume)}
-      setResume((old) => ({ ...old, ...normalizeResume(r), basics: {...normalizeResume(r).basics, avatar: old.basics?.avatar || ''}, versions:[...(old.versions || []),backup], updatedAt: Date.now() }))
+      const next={...resume,...normalizeResume(r),basics:{...normalizeResume(r).basics,avatar:resume.basics?.avatar || ''},versions:[...(resume.versions||[]),backup],updatedAt:Date.now()}
+      setUndo({full:true,before:pickContent(resume),after:pickContent(next)});setResume(next)
       setSaved(false)
       setGenOpen(false)
     } catch (e) { setError(e.message) } finally { setGenLoading(false) }
@@ -193,6 +201,10 @@ export default function Editor() {
   }
   function undoChange() {
     if (!undo) return
+    if (undo.full) {
+      if (JSON.stringify(pickContent(latest.current))!==JSON.stringify(undo.after) && !window.confirm('正文后来又有修改。是否恢复上次 AI 修改前的全部正文？')) return
+      patch(d=>({...d,...structuredClone(undo.before)}));setUndo(null);return
+    }
     if (targetValue(latest.current,undo.target)!==undo.after && !window.confirm('这段内容后来又有修改。撤销将恢复 AI 应用前的原文，是否继续？')) return
     patch(d=>writeTarget(d,undo.target,undo.before));setUndo(null)
   }
@@ -272,8 +284,9 @@ export default function Editor() {
 
       // 步骤 3：保存
       setOptStep(3)
-      setResume(next)
-      await persist({ ...pickContent(next), versions: next.versions })
+      setUndo({full:true,before:pickContent(resume),after:pickContent(next)})
+      setResume(next);setSaved(false)
+      await persist(next)
       setSaved(true)
 
       // 步骤 4：复检评分
@@ -291,7 +304,9 @@ export default function Editor() {
       const chinese = (String(resume?.summary || '') + String(resume?.basics?.title || '')).match(/[\u4e00-\u9fa5]/g)?.length || 0
       const target = chinese > 0 ? 'en' : 'zh'
       const r = await api.translate({ resume: pickContent(resume), target })
-      setResume((old) => ({ ...old, ...normalizeContent(r), basics: {...normalizeContent(r).basics, avatar: old.basics?.avatar || ''}, updatedAt: Date.now() }))
+      if (!window.confirm('翻译会替换当前正文，确认后可撤销。是否应用翻译？')) return
+      const next={...resume,...normalizeContent(r),basics:{...normalizeContent(r).basics,avatar:resume.basics?.avatar || ''},updatedAt:Date.now()}
+      setUndo({full:true,before:pickContent(resume),after:pickContent(next)});setResume(next)
       setSaved(false)
     } catch (e) { setError(e.message) } finally { setTransLoading(false) }
   }
@@ -324,7 +339,8 @@ export default function Editor() {
   }
 
   if (error && !resume) return <div className="error-banner">{error}</div>
-  if (!resume) return <div className="loading">加载中…</div>
+  if (!resume) return error ? <div className="error-banner">{error}<button className="btn" onClick={()=>nav('/app')}>返回我的简历</button></div> : <div className="loading">加载中…</div>
+  const aiBusy=genLoading || transLoading || optOpen || genExpIdx>=0 || !!applyingId || scoreLoading || dupLoading
 
   const b = resume.basics || {}
 
@@ -344,10 +360,10 @@ export default function Editor() {
           </div>
         </div>
         <div className="page-header-actions">
-          <button className="btn" onClick={doScore} disabled={scoreLoading}><Icon name="activity" size={15} />{scoreLoading ? '体检中…' : 'AI 体检（1 次）'}</button>
-          <button className="btn" onClick={doDuplicate} disabled={dupLoading}><Icon name="search" size={15} />{dupLoading ? '查重中…' : '查重'}</button>
-          <button className="btn" onClick={doTranslate} disabled={transLoading}><Icon name="refresh" size={15} />{transLoading ? '翻译中…' : '中英互译'}</button>
-          <button className="btn" onClick={openShare} disabled={shareLoading}><Icon name="send" size={15} />{shareLoading ? '生成中…' : '分享投递'}</button>
+          <button className="btn" onClick={doScore} disabled={aiBusy}><Icon name="activity" size={15} />{scoreLoading ? '体检中…' : 'AI 体检（1 次）'}</button>
+          <button className="btn" onClick={doDuplicate} disabled={aiBusy}><Icon name="search" size={15} />{dupLoading ? '查重中…' : '查重'}</button>
+          <button className="btn" onClick={doTranslate} disabled={aiBusy}><Icon name="refresh" size={15} />{transLoading ? '翻译中…' : '中英互译'}</button>
+          <button className="btn" onClick={openShare} disabled={shareLoading || aiBusy}><Icon name="send" size={15} />{shareLoading ? '生成中…' : '分享投递'}</button>
         </div>
       </div>
 
@@ -356,16 +372,16 @@ export default function Editor() {
       {/* 工具栏：分主区/版本/模板/主题/导出 五段，主操作靠右更醒目 */}
       <div className="editor-toolbar">
         <div className="toolbar-section toolbar-main">
-          <button className="btn btn-primary" onClick={() => setGenOpen(true)}><Icon name="sparkles" size={16} />填写引导</button>
-          <button className="btn btn-primary-soft" onClick={doOneClickOptimize} disabled={optOpen}><Icon name="wand" size={16} />一键优化（至少 3 次）</button>
-          {undo && <button className="btn" onClick={undoChange}>撤销上次 AI 修改</button>}
+          <button className="btn btn-primary" onClick={() => setGenOpen(true)} disabled={aiBusy}><Icon name="sparkles" size={16} />填写引导</button>
+          <button className="btn btn-primary-soft" onClick={doOneClickOptimize} disabled={aiBusy}><Icon name="wand" size={16} />一键优化（至少 3 次）</button>
+          {undo && <button className="btn" onClick={undoChange} disabled={aiBusy}>撤销上次 AI 修改</button>}
           <button className="btn" onClick={() => save().catch(() => {})} disabled={saved || saving}><Icon name="check" size={16} />{saving ? '保存中…' : saved ? '已保存' : '保存'}</button>
         </div>
 
         <div className="toolbar-divider" />
 
         <div className="toolbar-section">
-          <button className="btn btn-sm" onClick={() => setTplOpen(true)}>
+          <button className="btn btn-sm" onClick={() => setTplOpen(true)} disabled={aiBusy}>
             <Icon name="layout" size={14} />模板 · {TEMPLATES.find((t) => t.key === template)?.label || '经典单栏'}
           </button>
         </div>
@@ -390,7 +406,7 @@ export default function Editor() {
         <div className="toolbar-spacer" />
 
         <div className="toolbar-section">
-          <button className="btn btn-primary" onClick={async () => { try { if (!saved) await save(); window.print() } catch {} }}><Icon name="download" size={15} />导出 PDF</button>
+          <button className="btn btn-primary" disabled={!previewStatus.ready || aiBusy} onClick={async () => { try { if (!saved) await save(); window.print() } catch {} }}><Icon name="download" size={15} />导出 PDF</button>
         </div>
       </div>
 
@@ -443,7 +459,7 @@ export default function Editor() {
                 <Field label="工作内容（每行一条）">
                   <textarea className="textarea" rows={4} value={exp.bullets || ''} onChange={(e) => patch((d) => { d.experience[i].bullets = e.target.value; return d })} placeholder={'负责……（动作 + 结果 + 量化指标）'} />
                 </Field>
-                <button className="btn btn-sm btn-soft" onClick={() => genExperience(i)} disabled={genExpIdx === i}>
+                <button className="btn btn-sm btn-soft" onClick={() => genExperience(i)} disabled={aiBusy}>
                   {genExpIdx === i ? '润色中…' : <><Icon name="sparkles" size={14} />AI 润色</>}
                 </button>
               </div>
@@ -491,16 +507,16 @@ export default function Editor() {
           </Section>
 
           <Section title="技能">
-            <textarea className="textarea" rows={3} value={(resume.skills || []).join('\n')} onChange={(e) => patch((d) => { d.skills = e.target.value.split('\n').filter(Boolean); return d })} placeholder="每行一个技能，如：JavaScript / TypeScript" />
+            <textarea className="textarea" rows={3} value={(resume.skills || []).join('\n')} onChange={(e) => patch((d) => { d.skills = e.target.value.split('\n'); return d })} placeholder="每行一个技能，如：JavaScript / TypeScript" />
           </Section>
 
           <Section title="荣誉奖项">
-            <textarea className="textarea" rows={3} value={(resume.honors || []).join('\n')} onChange={(e) => patch((d) => { d.honors = e.target.value.split('\n').filter(Boolean); return d })} placeholder="每行一条荣誉" />
+            <textarea className="textarea" rows={3} value={(resume.honors || []).join('\n')} onChange={(e) => patch((d) => { d.honors = e.target.value.split('\n'); return d })} placeholder="每行一条荣誉" />
           </Section>
         </fieldset>
 
         {/* ===== 右侧：预览 ===== */}
-        <ResumeCanvas resume={resume} template={template} accent={accent} />
+        <ResumeCanvas resume={resume} template={template} accent={accent} onStatus={setPreviewStatus} />
       </div>
 
       {change && <ChangeReview {...change} onApply={applyChange} onClose={()=>setChange(null)} />}
@@ -522,7 +538,7 @@ export default function Editor() {
             </div>
             <div className="modal-foot">
               <button className="btn" onClick={() => setGenOpen(false)}>取消</button>
-              <button className="btn btn-primary" onClick={doGenerate} disabled={genLoading}><Icon name="sparkles" size={16} />{genLoading ? '生成中…' : '立即生成'}</button>
+              <button className="btn btn-primary" onClick={doGenerate} disabled={aiBusy}><Icon name="sparkles" size={16} />{genLoading ? '生成中…' : '立即生成'}</button>
             </div>
           </div>
         </div>

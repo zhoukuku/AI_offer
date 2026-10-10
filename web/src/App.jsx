@@ -1,8 +1,9 @@
+import { lazy,Suspense } from 'react'
 import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import Layout from './components/Layout.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Editor from './pages/Editor.jsx'
-import AIChatPage from './pages/AIChatPage.jsx'
+const AIChatPage=lazy(()=>import('./pages/AIChatPage.jsx'))
 import JobMatch from './pages/JobMatch.jsx'
 import Companies from './pages/Companies.jsx'
 import Applications from './pages/Applications.jsx'
@@ -48,7 +49,7 @@ export default function App() {
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route path="/app" element={<Dashboard />} />
         <Route path="/resume/:id" element={<EditorRoute />} />
-        <Route path="/ai" element={<AIChatPage />} />
+        <Route path="/ai" element={<Suspense fallback={<div className="loading">加载对话…</div>}><AIChatPage /></Suspense>} />
         <Route path="/match" element={<JobMatch />} />
         <Route path="/companies" element={<Companies />} />
         <Route path="/applications" element={<Applications />} />

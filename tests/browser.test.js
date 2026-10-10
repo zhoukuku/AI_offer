@@ -47,7 +47,7 @@ test('浏览器：登录 → 导入 → 自动保存 → 诊断 → 分享 → J
   await page.getByRole('button',{name:'保存并 AI 复盘'}).click()
   await expect(page.getByText('说明了实际项目与个人贡献',{exact:true})).toBeVisible()
   await page.screenshot({path:fileURLToPath(new URL('interviews.png',artifacts)),fullPage:true,animations:'disabled'})
-  await page.goto(server.base+'/upgrade');await page.getByRole('button',{name:'模拟开通（不扣款）'}).click();await page.locator('.ok-banner').waitFor();assert.match(await page.locator('.upgrade-quota-value').first().innerText(),/不限/)
+  await page.goto(server.base+'/upgrade');await page.getByRole('button',{name:'模拟开通（不扣款）'}).click();await page.locator('.ok-banner').waitFor();assert.match(await page.locator('.upgrade-quota-value').first().innerText(),/^100$/)
   assert.deepEqual(errors,[])
   assert.ok((await fs.stat(new URL('resume.pdf',artifacts))).size>1000)
  } finally {await browser.close();await server.stop()}
